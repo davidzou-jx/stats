@@ -218,7 +218,7 @@ public class StackWidget: WidgetWrapper {
         if !fixedSizeState {
             let firstRowWidth = topElement.value.widthOfString(usingFont: font)
             let secondRowWidth = bottomElement?.value.widthOfString(usingFont: font) ?? 0
-            width = max(20, max(firstRowWidth, secondRowWidth)).rounded(.up) + 2
+            width = max(20, max(firstRowWidth, secondRowWidth)).rounded(.up)
         }
         
         var rect = CGRect(x: x, y: rowHeight+1, width: width, height: rowHeight)

@@ -27,7 +27,7 @@ public class Mini: WidgetWrapper {
     private var _label: String
     
     private var width: CGFloat {
-        (self.labelState ? 31 : 36) + (2*Constants.Widget.margin.x)
+        (self.labelState ? 28 : 33) + (2*Constants.Widget.margin.x)
     }
     
     private var alignment: NSTextAlignment {
@@ -115,7 +115,7 @@ public class Mini: WidgetWrapper {
             style.alignment = self.alignment
             
             let stringAttributes = [
-                NSAttributedString.Key.font: NSFont.systemFont(ofSize: 7, weight: .light),
+                NSAttributedString.Key.font: NSFont.monospacedDigitSystemFont(ofSize: 7, weight: .light),
                 NSAttributedString.Key.foregroundColor: isDarkMode ? NSColor.white : NSColor.textColor,
                 NSAttributedString.Key.paragraphStyle: style
             ]
@@ -136,7 +136,7 @@ public class Mini: WidgetWrapper {
         }
         
         let stringAttributes = [
-            NSAttributedString.Key.font: NSFont.systemFont(ofSize: valueSize, weight: .regular),
+            NSAttributedString.Key.font: NSFont.monospacedDigitSystemFont(ofSize: valueSize, weight: .regular),
             NSAttributedString.Key.foregroundColor: color,
             NSAttributedString.Key.paragraphStyle: style
         ]

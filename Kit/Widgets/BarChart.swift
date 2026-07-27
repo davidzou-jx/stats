@@ -62,9 +62,9 @@ public class BarChart: WidgetWrapper {
         }
         
         super.init(.barChart, title: widgetTitle, frame: CGRect(
-            x: Constants.Widget.margin.x,
+            x: 0,
             y: Constants.Widget.margin.y,
-            width: Constants.Widget.width + (2*Constants.Widget.margin.x),
+            width: Constants.Widget.width,
             height: Constants.Widget.height - (2*Constants.Widget.margin.y)
         ))
         
@@ -121,7 +121,7 @@ public class BarChart: WidgetWrapper {
             return
         }
         
-        var width: CGFloat = Constants.Widget.margin.x*2
+        var width: CGFloat = 0
         var x: CGFloat = 0
         let lineWidth = 1 / (NSScreen.main?.backingScaleFactor ?? 1)
         let offset = lineWidth / 2
@@ -157,13 +157,13 @@ public class BarChart: WidgetWrapper {
             }
             
             width += letterWidth + Constants.Widget.spacing
-            x = letterWidth + Constants.Widget.spacing
+            x = letterWidth + Constants.Widget.spacing - Constants.Widget.margin.x
         }
         
         let box = NSBezierPath(roundedRect: NSRect(
             x: x + offset,
             y: offset,
-            width: width - x - (offset*2) - (Constants.Widget.margin.x*2),
+            width: width - x - (offset*2),
             height: self.frame.size.height - (offset*2)
         ), xRadius: 2, yRadius: 2)
         
