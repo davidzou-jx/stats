@@ -44,6 +44,8 @@
 "No" = "No";
 "Automatic" = "Automatic";
 "Manual" = "Manual";
+"Custom" = "Custom";
+"Edit fan curve config…" = "Edit fan curve config…";
 "None" = "None";
 "Dots" = "Dots";
 "Arrows" = "Arrows";

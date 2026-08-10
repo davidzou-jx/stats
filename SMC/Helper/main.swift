@@ -263,7 +263,23 @@ struct CodesignCheck {
         do {
             let selfCerts = try self.codeSigningCertificatesForSelf()
             let fileCerts = try self.codeSigningCertificates(forStaticCode: code)
-            return !selfCerts.isEmpty && selfCerts == fileCerts
+            if !selfCerts.isEmpty {
+                return selfCerts == fileCerts
+            }
+            // Ad-hoc builds (no certificate chain) are the norm for this fork.
+            // Command-line tools don't carry an embedded Info.plist, so their
+            // identifier is unreliable; accept the bundled smc tool when it is
+            // validly signed and located inside this app bundle.
+            let appPath = URL(fileURLWithPath: CommandLine.arguments[0])
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+            guard path.hasPrefix(appPath + "/Contents/Resources/") else {
+                return false
+            }
+            return SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSDoNotValidateResources | kSecCSCheckNestedCode), nil) == errSecSuccess
         } catch {
             return false
         }

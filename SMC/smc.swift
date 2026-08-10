@@ -46,6 +46,7 @@ internal enum SMCKeys: UInt8 {
 public enum FanMode: Int, Codable {
     case automatic = 0
     case forced = 1
+    case custom = 2
     case auto3 = 3
 
     public var isAutomatic: Bool {
@@ -485,6 +486,10 @@ public class SMC {
            speed > Int(maxSpeed) {
             return setFanSpeed(id, speed: Int(maxSpeed))
         }
+        if speed > 0, let minSpeed = self.getValue("F\(id)Mn"),
+           speed < Int(minSpeed) {
+            return setFanSpeed(id, speed: Int(minSpeed))
+        }
         
         #if arch(arm64)
         var modeVal = SMCVal_t(fanModeKey(id))
@@ -531,6 +536,8 @@ public class SMC {
             return
         }
         #endif
+
+        self.verifyAfterSettle("F\(id)Tg", expected: Double(speed))
     }
     
     // MARK: - Apple Silicon Fan Control
@@ -556,6 +563,18 @@ public class SMC {
         }
         print(smcError("write", key: value.key, result: lastResult))
         return false
+    }
+
+    /// SMC writes apply asynchronously on current firmware: an immediate read-back
+    /// still returns the old value. Verify the write after a settle window and only
+    /// log a warning on mismatch (the write itself already returned success).
+    private func verifyAfterSettle(_ key: String, expected: Double) {
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self, let value = self.getValue(key) else { return }
+            if abs(value - expected) > 1 {
+                print("SMC write verification: \(key) expected \(expected), read \(value)")
+            }
+        }
     }
     
     private func unlockFanControl(fanId: Int) -> Bool {

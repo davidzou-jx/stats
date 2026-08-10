@@ -1128,7 +1128,15 @@ public class SMCHelper {
     
     public var isInstalled: Bool {
         if #available(macOS 13, *) {
-            return SMAppService.daemon(plistName: self.plistName).status == .enabled
+            if SMAppService.daemon(plistName: self.plistName).status == .enabled {
+                return true
+            }
+        }
+        // Fallback for local ad-hoc builds: a manually installed launch daemon
+        // (e.g. /Library/LaunchDaemons/<plistName>) serves the same mach service
+        // and works even though SMAppService reports .notFound.
+        if FileManager.default.fileExists(atPath: "/Library/LaunchDaemons/\(self.plistName)") {
+            return true
         }
         return self.legacyIsInstalled
     }

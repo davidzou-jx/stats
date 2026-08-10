@@ -7,7 +7,7 @@ build:
 	xcodebuild \
 		-project ../Stats.xcodeproj \
   		-scheme SMC \
-  		-destination 'platform=OS X,arch=x86_64' \
+  		-destination 'generic/platform=macOS' \
   		-configuration Release archive \
   		-archivePath ./build/smc.xcarchive \
   		SKIP_INSTALL=NO
