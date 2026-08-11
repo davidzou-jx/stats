@@ -537,7 +537,9 @@ public class SMC {
         }
         #endif
 
+        #if arch(arm64)
         self.verifyAfterSettle("F\(id)Tg", expected: Double(speed))
+        #endif
     }
     
     // MARK: - Apple Silicon Fan Control
