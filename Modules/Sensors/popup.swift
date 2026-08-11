@@ -16,6 +16,37 @@ internal class Popup: PopupWrapper {
     private var list: [String: NSView] = [:]
     private var fansControlView: FanControlView? = nil
     
+    private static let temperatureOrder: [String: Int] = [
+        "Ts0P": 0,                  // Palm Rest
+        "Average Airflow": 1,       // Average Air Flow
+        "Average CPU": 2,
+        "Hottest CPU": 3,
+        "Average Super Cores": 4,
+        "Average Performance Cores": 5,
+        "Average GPU": 6,
+        "Hottest GPU": 7,
+        "TW0P": 8,                  // Airport
+        "Average Battery": 9,
+        "TH0x": 10                  // NAND
+    ]
+    private static let indentedTemperatureKeys: Set<String> = [
+        "Hottest CPU", "Average Super Cores", "Average Performance Cores", "Hottest GPU"
+    ]
+    private static let powerOrder: [String: Int] = [
+        "PSTR": 0,                  // System Total
+        "Average System Total": 1,  // indented
+        "PPBR": 2,                  // Battery
+        "PDTR": 3,                  // DC In
+        "CPU Power": 4,
+        "GPU Power": 5,
+        "ANE Power": 6,
+        "RAM Power": 7,
+        "PCI Power": 8
+    ]
+    private static let indentedPowerKeys: Set<String> = [
+        "Average System Total"
+    ]
+    
     private var unknownSensorsState: Bool { Store.shared.bool(key: "Sensors_unknown", defaultValue: false) }
     private var fanValueState: FanValue = .percentage
     
@@ -172,13 +203,43 @@ internal class Popup: PopupWrapper {
             if filtered.isEmpty { return }
             
             self.addArrangedSubview(separatorView(localizedString(typ.rawValue), width: self.frame.width))
-            groups.forEach { (group: SensorGroup) in
-                filtered.filter{ $0.group == group }.forEach { (s: Sensor_p) in
-                    let sensor = SensorView(s, width: self.frame.width) { [weak self] in
+            let order: [String: Int]
+            let indentedKeys: Set<String>
+            switch typ {
+            case .temperature:
+                order = Self.temperatureOrder
+                indentedKeys = Self.indentedTemperatureKeys
+            case .power:
+                order = Self.powerOrder
+                indentedKeys = Self.indentedPowerKeys
+            default:
+                order = [:]
+                indentedKeys = []
+            }
+            if !order.isEmpty {
+                let ordered = filtered.sorted { a, b in
+                    let aRank = order[a.key] ?? Int.max
+                    let bRank = order[b.key] ?? Int.max
+                    if aRank != bRank { return aRank < bRank }
+                    return false
+                }
+                ordered.forEach { (s: Sensor_p) in
+                    let indent = indentedKeys.contains(s.key) ? 3 : 0
+                    let sensor = SensorView(s, width: self.frame.width, indent: indent) { [weak self] in
                         self?.recalculateHeight()
                     }
                     self.addArrangedSubview(sensor)
                     self.list[s.key] = sensor
+                }
+            } else {
+                groups.forEach { (group: SensorGroup) in
+                    filtered.filter{ $0.group == group }.forEach { (s: Sensor_p) in
+                        let sensor = SensorView(s, width: self.frame.width) { [weak self] in
+                            self?.recalculateHeight()
+                        }
+                        self.addArrangedSubview(sensor)
+                        self.list[s.key] = sensor
+                    }
                 }
             }
         }
@@ -269,7 +330,7 @@ internal class SensorView: NSStackView {
         FanValue(rawValue: Store.shared.string(key: "Sensors_popup_fanValue", defaultValue: FanValue.percentage.rawValue)) ?? .percentage
     }
     
-    public init(_ sensor: Sensor_p, width: CGFloat, toggleable: Bool = true, callback: @escaping (() -> Void)) {
+    public init(_ sensor: Sensor_p, width: CGFloat, toggleable: Bool = true, indent: Int = 0, callback: @escaping (() -> Void)) {
         self.sizeCallback = callback
         
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 22))
@@ -278,7 +339,7 @@ internal class SensorView: NSStackView {
         self.distribution = .fillProportionally
         self.spacing = 0
         
-        self.valueView = ValueSensorView(sensor, width: width, toggleable: toggleable, callback: { [weak self] in
+        self.valueView = ValueSensorView(sensor, width: width, toggleable: toggleable, indent: indent, callback: { [weak self] in
             self?.open()
         })
         self.chartView = ChartSensorView(width: width, suffix: sensor.unit)
@@ -332,7 +393,7 @@ internal class ValueSensorView: NSStackView {
     
     private let isToggleable: Bool
     
-    public init(_ sensor: Sensor_p, width: CGFloat, toggleable: Bool = true, callback: @escaping (() -> Void)) {
+    public init(_ sensor: Sensor_p, width: CGFloat, toggleable: Bool = true, indent: Int = 0, callback: @escaping (() -> Void)) {
         self.callback = callback
         self.isToggleable = toggleable
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 22))
@@ -343,7 +404,7 @@ internal class ValueSensorView: NSStackView {
         self.spacing = 0
         self.layer?.cornerRadius = 3
         
-        self.labelView.stringValue = sensor.name
+        self.labelView.stringValue = indent > 0 ? String(repeating: " ", count: indent) + sensor.name : sensor.name
         self.labelView.toolTip = sensor.key
         self.valueView.stringValue = sensor.formattedValue
         

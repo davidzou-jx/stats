@@ -508,6 +508,7 @@ internal let SensorsList: [Sensor] = [
     Sensor(key: "TB1T", name: "Battery 1", group: .system, type: .temperature, platforms: Platform.apple),
     Sensor(key: "TB2T", name: "Battery 2", group: .system, type: .temperature, platforms: Platform.apple),
     Sensor(key: "TW0P", name: "Airport", group: .system, type: .temperature, platforms: Platform.apple),
+    Sensor(key: "Ts0P", name: "Palm Rest", group: .system, type: .temperature, platforms: Platform.apple),
     
     // Voltage
     Sensor(key: "VCAC", name: "CPU IA", group: .CPU, type: .voltage, platforms: Platform.all),

@@ -300,6 +300,18 @@ internal class SensorsReader: Reader<Sensors_List> {
             list.append(Sensor(key: "Average Performance Cores", name: "Average Performance Cores", value: performanceCoreSensors.reduce(0, +) / Double(performanceCoreSensors.count), group: .CPU, type: .temperature, platforms: Platform.all, isComputed: true))
         }
         
+        // Average battery temperature (Battery 1 + Battery 2 on dual-battery models).
+        let batterySensors = sensors.filter({ $0.type == .temperature && ($0.key == "TB1T" || $0.key == "TB2T") }).map{ $0.value }
+        if !batterySensors.isEmpty {
+            list.append(Sensor(key: "Average Battery", name: "Average Battery", value: batterySensors.reduce(0, +) / Double(batterySensors.count), group: .system, type: .temperature, platforms: Platform.all, isComputed: true))
+        }
+        
+        // Average airflow temperature (Airflow left + right).
+        let airflowSensors = sensors.filter({ $0.type == .temperature && ($0.key == "TaLP" || $0.key == "TaRF") }).map{ $0.value }
+        if !airflowSensors.isEmpty {
+            list.append(Sensor(key: "Average Airflow", name: "Average Air Flow", value: airflowSensors.reduce(0, +) / Double(airflowSensors.count), group: .sensor, type: .temperature, platforms: Platform.all, isComputed: true))
+        }
+        
         if !gpuSensors.isEmpty {
             let value = gpuSensors.reduce(0, +) / Double(gpuSensors.count)
             list.append(Sensor(key: "Average GPU", name: "Average GPU", value: value, group: .GPU, type: .temperature, platforms: Platform.all, isComputed: true))
@@ -319,6 +331,10 @@ internal class SensorsReader: Reader<Sensors_List> {
             list.append(Sensor(key: "Average System Total", name: "Average System Total", value: 0, group: .sensor, type: .power, platforms: Platform.all, isComputed: true))
         }
         
+        // Cluster averages are displayed in natural core order rather than
+        // alphabetical order (Super before Performance).
+        let clusterOrder = ["average super cores": 0, "average performance cores": 1]
+        
         return list.filter({ (s: Sensor_p) -> Bool in
             switch s.type {
             case .temperature:
@@ -329,7 +345,14 @@ internal class SensorsReader: Reader<Sensors_List> {
                 return s.value < 100 && s.value >= 0
             default: return true
             }
-        }).sorted { $0.key.lowercased() < $1.key.lowercased() }
+        }).sorted { a, b in
+            let aKey = a.key.lowercased()
+            let bKey = b.key.lowercased()
+            let aRank = clusterOrder[aKey] ?? 2
+            let bRank = clusterOrder[bKey] ?? 2
+            if aRank != bRank { return aRank < bRank }
+            return aKey < bKey
+        }
     }
     
     public func unknownCallback() {
