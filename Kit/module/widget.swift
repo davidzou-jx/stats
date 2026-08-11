@@ -219,6 +219,11 @@ open class WidgetWrapper: NSView, widget_p {
         }
     }
     
+    open override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.current?.cgContext.clear(self.bounds)
+        super.draw(dirtyRect)
+    }
+    
     open func settings() -> NSView { return NSView() }
     
     open override func mouseDown(with event: NSEvent) {

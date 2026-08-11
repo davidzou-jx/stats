@@ -107,8 +107,8 @@ public class StackWidget: WidgetWrapper {
         }
         
         let num: Int = Int(round(Double(values.count) / 2))
-        var totalWidth: CGFloat = Constants.Widget.spacing  // opening space
-        var x: CGFloat = Constants.Widget.spacing
+        var totalWidth: CGFloat = Constants.Widget.spacing + Constants.Widget.margin.x  // opening space
+        var x: CGFloat = Constants.Widget.spacing + Constants.Widget.margin.x
         
         var i = 0
         while i < values.count {
@@ -148,7 +148,7 @@ public class StackWidget: WidgetWrapper {
             
             i += 1
         }
-        totalWidth += Constants.Widget.spacing // closing space
+        totalWidth += Constants.Widget.spacing + Constants.Widget.margin.x // closing space
         
         guard abs(self.frame.width - totalWidth) > 2 else { return }
         self.setWidth(totalWidth)
