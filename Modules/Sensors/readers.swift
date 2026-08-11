@@ -288,6 +288,18 @@ internal class SensorsReader: Reader<Sensors_List> {
                 list.append(Sensor(key: "Hottest CPU", name: "Hottest CPU", value: max, group: .CPU, type: .temperature, platforms: Platform.all, isComputed: true))
             }
         }
+        
+        // Cluster averages, e.g. the M5's super (S) and performance (P) cores.
+        let superCoreSensors = sensors.filter({ $0.group == .CPU && $0.type == .temperature && $0.average && $0.name.localizedCaseInsensitiveContains("super") }).map{ $0.value }
+        let performanceCoreSensors = sensors.filter({ $0.group == .CPU && $0.type == .temperature && $0.average && $0.name.localizedCaseInsensitiveContains("performance") }).map{ $0.value }
+        
+        if !superCoreSensors.isEmpty {
+            list.append(Sensor(key: "Average Super Cores", name: "Average Super Cores", value: superCoreSensors.reduce(0, +) / Double(superCoreSensors.count), group: .CPU, type: .temperature, platforms: Platform.all, isComputed: true))
+        }
+        if !performanceCoreSensors.isEmpty {
+            list.append(Sensor(key: "Average Performance Cores", name: "Average Performance Cores", value: performanceCoreSensors.reduce(0, +) / Double(performanceCoreSensors.count), group: .CPU, type: .temperature, platforms: Platform.all, isComputed: true))
+        }
+        
         if !gpuSensors.isEmpty {
             let value = gpuSensors.reduce(0, +) / Double(gpuSensors.count)
             list.append(Sensor(key: "Average GPU", name: "Average GPU", value: value, group: .GPU, type: .temperature, platforms: Platform.all, isComputed: true))
