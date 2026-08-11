@@ -1465,7 +1465,7 @@ internal class FanControlView: NSStackView {
         self.profilePicker = picker
         self.refreshProfilePicker()
 
-        let edit: NSButton = NSButton(title: localizedString("Edit fan curve config…"), target: self, action: #selector(self.openFanCurveConfig))
+        let edit: NSButton = NSButton(title: localizedString("Configs"), target: self, action: #selector(self.openFanCurveConfig))
         edit.isBordered = false
         edit.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         edit.setContentHuggingPriority(.defaultHigh, for: .horizontal)
