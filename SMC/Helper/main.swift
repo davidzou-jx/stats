@@ -26,7 +26,7 @@ class Helper: NSObject, NSXPCListenerDelegate, HelperProtocol {
     private var smc: String? = nil
     
     override init() {
-        self.listener = NSXPCListener(machServiceName: "eu.exelban.Stats.SMC.Helper")
+        self.listener = NSXPCListener(machServiceName: "eu.exelban.Stats.SMC.Helper.Local")
         super.init()
         self.listener.delegate = self
     }

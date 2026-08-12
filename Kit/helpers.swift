@@ -1123,8 +1123,8 @@ public enum SMCHelperInstallState {
 public class SMCHelper {
     public static let shared = SMCHelper()
     
-    private let id: String = "eu.exelban.Stats.SMC.Helper"
-    private let plistName: String = "eu.exelban.Stats.SMC.Helper.plist"
+    private let id: String = "eu.exelban.Stats.SMC.Helper.Local"
+    private let plistName: String = "eu.exelban.Stats.SMC.Helper.Local.plist"
     
     public var isInstalled: Bool {
         if #available(macOS 13, *) {
@@ -1344,7 +1344,7 @@ public class SMCHelper {
             return self.connection
         }
         
-        let connection = NSXPCConnection(machServiceName: "eu.exelban.Stats.SMC.Helper", options: .privileged)
+        let connection = NSXPCConnection(machServiceName: self.id, options: .privileged)
         connection.exportedObject = self
         connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
         connection.invalidationHandler = { [weak self] in
