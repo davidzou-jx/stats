@@ -193,6 +193,52 @@ public let NetworkReaders: [KeyValue_t] = [
     KeyValue_t(key: "process", value: "Processes based")
 ]
 
+public class CombinedGroups {
+    public static let shared = CombinedGroups()
+    private let key = "CombinedGroups"
+
+    private func load() -> [String: Int] {
+        guard let data = Store.shared.data(key: self.key),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Int] else {
+            return [:]
+        }
+        return dict
+    }
+
+    private func save(_ groups: [String: Int]) {
+        if let data = try? JSONSerialization.data(withJSONObject: groups) {
+            Store.shared.set(key: self.key, value: data)
+        }
+    }
+
+    public func groupID(for module: String) -> Int? {
+        let id = self.load()[module] ?? 0
+        return id > 0 ? id : nil
+    }
+
+    public func all() -> [String: Int] {
+        self.load()
+    }
+
+    public func setGroup(_ id: Int, for module: String) {
+        var groups = self.load()
+        if id > 0 {
+            groups[module] = id
+        } else {
+            groups.removeValue(forKey: module)
+        }
+        self.save(groups)
+    }
+
+    public func replace(_ groups: [String: Int]) {
+        self.save(groups)
+    }
+
+    public func hasGroups() -> Bool {
+        !self.load().isEmpty
+    }
+}
+
 internal let Alignments: [KeyValue_t] = [
     KeyValue_t(key: "left", value: "Left alignment", additional: NSTextAlignment.left),
     KeyValue_t(key: "center", value: "Center alignment", additional: NSTextAlignment.center),
@@ -315,6 +361,7 @@ public extension Notification.Name {
     static let pause = Notification.Name("pause")
     static let toggleFanControl = Notification.Name("toggleFanControl")
     static let combinedModulesPopup = Notification.Name("combinedModulesPopup")
+    static let combinedGroupsChanged = Notification.Name("combinedGroupsChanged")
     static let remoteLoginSuccess = Notification.Name("remoteLoginSuccess")
     static let remoteState = Notification.Name("remoteState")
     static let remoteAuthenticated = Notification.Name("remoteAuthenticated")

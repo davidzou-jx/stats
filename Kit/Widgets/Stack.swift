@@ -107,8 +107,8 @@ public class StackWidget: WidgetWrapper {
         }
         
         let num: Int = Int(round(Double(values.count) / 2))
-        var totalWidth: CGFloat = Constants.Widget.spacing + Constants.Widget.margin.x  // opening space
-        var x: CGFloat = Constants.Widget.spacing + Constants.Widget.margin.x
+        var totalWidth: CGFloat = Constants.Widget.spacing  // opening space
+        var x: CGFloat = Constants.Widget.spacing
         
         var i = 0
         while i < values.count {
@@ -148,7 +148,7 @@ public class StackWidget: WidgetWrapper {
             
             i += 1
         }
-        totalWidth += Constants.Widget.spacing + Constants.Widget.margin.x // closing space
+        totalWidth += Constants.Widget.spacing // closing space
         
         guard abs(self.frame.width - totalWidth) > 2 else { return }
         self.setWidth(totalWidth)
@@ -174,7 +174,7 @@ public class StackWidget: WidgetWrapper {
         
         var width: CGFloat = self.oneRowWidth
         if !fixedSizeState {
-            width = element.value.widthOfString(usingFont: font).rounded(.up) + 2
+            width = element.value.widthOfString(usingFont: font).rounded(.up) + 1
         }
         
         let rect = CGRect(x: x, y: (Constants.Widget.height-13)/2, width: width, height: 13)
@@ -218,7 +218,7 @@ public class StackWidget: WidgetWrapper {
         if !fixedSizeState {
             let firstRowWidth = topElement.value.widthOfString(usingFont: font)
             let secondRowWidth = bottomElement?.value.widthOfString(usingFont: font) ?? 0
-            width = max(20, max(firstRowWidth, secondRowWidth)).rounded(.up)
+            width = max(18, max(firstRowWidth, secondRowWidth)).rounded(.up) + 1
         }
         
         var rect = CGRect(x: x, y: rowHeight+1, width: width, height: rowHeight)

@@ -13,86 +13,177 @@ import Cocoa
 import Kit
 
 internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
+    private var groups: [Int: CombinedGroup] = [:]
+    
+    override init() {
+        super.init()
+        
+        self.migrateIfNeeded()
+        
+        modules.forEach { (m: Module) in
+            m.menuBar.callback = { [weak self] in
+                if let s = self, !s.groups.isEmpty {
+                    DispatchQueue.main.async(execute: {
+                        s.recalculateAll()
+                    })
+                }
+            }
+        }
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(listenForModuleRearrrange), name: .moduleRearrange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(listenCombinedModulesPopup), name: .combinedModulesPopup, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(listenForModule), name: .toggleModule, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(listenForCombinedGroupsChanged), name: .combinedGroupsChanged, object: nil)
+        
+        if CombinedGroups.shared.hasGroups() {
+            self.reconfigure()
+        }
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: .moduleRearrange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .combinedModulesPopup, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .toggleModule, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .combinedGroupsChanged, object: nil)
+    }
+    
+    private func migrateIfNeeded() {
+        guard !Store.shared.exist(key: "CombinedGroups") else { return }
+        guard Store.shared.bool(key: "CombinedModules", defaultValue: false) else { return }
+        
+        var groups: [String: Int] = [:]
+        modules.filter({ $0.enabled }).forEach { (m: Module) in
+            groups[m.name] = 1
+        }
+        CombinedGroups.shared.replace(groups)
+        Store.shared.set(key: "CombinedModules", value: false)
+    }
+    
+    private func reconfigure() {
+        var desired: [Int: [Module]] = [:]
+        modules.filter({ $0.enabled }).forEach { (m: Module) in
+            if let id = CombinedGroups.shared.groupID(for: m.name) {
+                desired[id, default: []].append(m)
+            }
+        }
+        
+        let desiredIDs = Set(desired.keys)
+        self.groups.keys.filter({ !desiredIDs.contains($0) }).forEach { id in
+            self.groups[id]?.disable()
+            self.groups.removeValue(forKey: id)
+        }
+        
+        desired.sorted(by: { $0.key < $1.key }).forEach { (id, mods) in
+            if let group = self.groups[id] {
+                group.setModules(mods)
+            } else {
+                let group = CombinedGroup(id: id)
+                self.groups[id] = group
+                group.setModules(mods)
+                group.enable()
+            }
+        }
+    }
+    
+    private func recalculateAll() {
+        self.groups.values.forEach { $0.recalculate() }
+    }
+    
+    private func updateClickHandling() {
+        self.groups.values.forEach { $0.updateClickHandling() }
+    }
+    
+    // call when popup appear/disappear
+    private func visibilityCallback(_ state: Bool) {}
+    
+    @objc private func listenForModuleRearrrange() {
+        self.recalculateAll()
+    }
+    
+    @objc private func listenCombinedModulesPopup() {
+        self.updateClickHandling()
+    }
+    
+    @objc private func listenForModule() {
+        self.reconfigure()
+    }
+    
+    @objc private func listenForCombinedGroupsChanged() {
+        DispatchQueue.main.async(execute: {
+            self.reconfigure()
+        })
+    }
+}
+
+private class CombinedGroup: NSObject {
+    let id: Int
+    var modules: [Module] = []
+    
     private var menuBarItem: NSStatusItem? = nil
     private var view: NSView = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: Constants.Widget.height))
     private var popup: PopupWindow? = nil
+    private let popupView: Popup
     
-    private var status: Bool {
-        Store.shared.bool(key: "CombinedModules", defaultValue: false)
-    }
     private var spacing: CGFloat {
         CGFloat(Int(Store.shared.string(key: "CombinedModules_spacing", defaultValue: "")) ?? 0)
     }
     private var separator: Bool {
         Store.shared.bool(key: "CombinedModules_separator", defaultValue: false)
     }
-    
-    private var activeModules: [Module] {
-        modules.filter({ $0.enabled }).sorted(by: { $0.combinedPosition < $1.combinedPosition })
-    }
-    
     private var combinedModulesPopup: Bool {
-        get { Store.shared.bool(key: "CombinedModules_popup", defaultValue: true) }
-        set { Store.shared.set(key: "CombinedModules_popup", value: newValue) }
+        Store.shared.bool(key: "CombinedModules_popup", defaultValue: true)
     }
     
-    override init() {
+    init(id: Int) {
+        self.id = id
+        self.popupView = Popup(modules: [])
         super.init()
-        
-        modules.forEach { (m: Module) in
-            m.menuBar.callback = { [weak self] in
-                if let s = self?.status, s {
-                    DispatchQueue.main.async(execute: {
-                        self?.recalculate()
-                    })
-                }
-            }
-        }
-        
-        self.popup = PopupWindow(title: "Combined modules", module: .combined, view: Popup()) { _ in }
-        
-        if self.status {
-            self.enable()
-        }
-        
-        NotificationCenter.default.addObserver(self, selector: #selector(listenForOneView), name: .toggleOneView, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(listenForModuleRearrrange), name: .moduleRearrange, object: nil)
+        self.popup = PopupWindow(title: "Combined group \(id)", module: .combined, view: self.popupView) { _ in }
     }
     
-    deinit {
-        NotificationCenter.default.removeObserver(self, name: .toggleOneView, object: nil)
-        NotificationCenter.default.removeObserver(self, name: .moduleRearrange, object: nil)
+    func setModules(_ modules: [Module]) {
+        self.modules = modules.sorted(by: { $0.combinedPosition < $1.combinedPosition })
+        self.popupView.setModules(self.modules)
+        self.recalculate()
+        self.updateClickHandling()
     }
     
-    public func enable() {
+    func enable() {
+        guard self.menuBarItem == nil else { return }
+        
         self.menuBarItem = NSStatusBar.system.statusItem(withLength: 0)
         DispatchQueue.main.async(execute: {
-            self.menuBarItem?.autosaveName = "CombinedModules"
+            self.menuBarItem?.autosaveName = "CombinedGroup-\(self.id)"
         })
         self.menuBarItem?.button?.addSubview(self.view)
         self.menuBarItem?.button?.image = NSImage()
-        self.menuBarItem?.button?.toolTip = localizedString("Combined modules")
+        self.menuBarItem?.button?.toolTip = "\(localizedString("Combined modules")) \(self.id)"
         
-        self.menuBarItem?.button?.target = self
-        self.menuBarItem?.button?.action = #selector(self.handleClick)
-        self.menuBarItem?.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
+        self.updateClickHandling()
         
         DispatchQueue.main.async(execute: {
             self.recalculate()
         })
     }
     
-    public func disable() {
+    func disable() {
+        self.modules.forEach { (m: Module) in
+            m.menuBar.widgets.forEach { w in
+                w.item.onClick = nil
+            }
+        }
         if let item = self.menuBarItem {
             NSStatusBar.system.removeStatusItem(item)
         }
         self.menuBarItem = nil
     }
     
-    private func recalculate() {
+    func recalculate() {
+        guard let item = self.menuBarItem else { return }
+        
         self.view.subviews.forEach({ $0.removeFromSuperview() })
         
-        let visibleModules = self.activeModules.filter({ !$0.menuBar.activeWidgets.isEmpty })
+        let visibleModules = self.modules.filter({ !$0.menuBar.activeWidgets.isEmpty })
         var w: CGFloat = 0
         visibleModules.enumerated().forEach { (i, m) in
             if i != 0 {
@@ -107,41 +198,43 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
             w += m.menuBar.view.frame.width
         }
         self.view.setFrameSize(NSSize(width: w, height: self.view.frame.height))
-        self.menuBarItem?.length = w
+        item.length = w
     }
     
-    // call when popup appear/disappear
-    private func visibilityCallback(_ state: Bool) {}
-    
-    @objc private func handleClick() {
-        if self.combinedModulesPopup {
-            self.togglePopup()
-        } else {
-            self.openModulePopup()
-        }
-    }
-    
-    private func openModulePopup() {
-        guard let window = self.menuBarItem?.button?.window else { return }
-        let location = self.view.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
-        let visibleModules = self.activeModules.filter({ !$0.menuBar.activeWidgets.isEmpty })
-        guard let module = visibleModules.last(where: { $0.menuBar.view.frame.minX <= location.x }) ?? visibleModules.first else { return }
+    func updateClickHandling() {
+        guard let item = self.menuBarItem else { return }
         
-        var userInfo: [String: Any] = [
-            "module": module.name,
-            "origin": window.frame.origin,
-            "center": window.frame.width/2
-        ]
-        let widgetLocation = module.menuBar.view.convert(location, from: self.view)
-        let widgets = module.menuBar.activeWidgets
-        if let widget = widgets.last(where: { $0.item.frame.minX <= widgetLocation.x }) ?? widgets.first {
-            userInfo["widget"] = widget.type
+        if !self.combinedModulesPopup {
+            self.modules.forEach { (m: Module) in
+                m.menuBar.widgets.forEach { w in
+                    w.item.onClick = {
+                        if let window = w.item.window {
+                            NotificationCenter.default.post(name: .togglePopup, object: nil, userInfo: [
+                                "module": m.name,
+                                "widget": w.type,
+                                "origin": window.frame.origin,
+                                "center": window.frame.width/2
+                            ])
+                        }
+                    }
+                }
+            }
+            item.button?.action = nil
+        } else {
+            self.modules.forEach { (m: Module) in
+                m.menuBar.widgets.forEach { w in
+                    w.item.onClick = nil
+                }
+            }
+            
+            item.button?.target = self
+            item.button?.action = #selector(self.togglePopup)
+            item.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
         }
-        NotificationCenter.default.post(name: .togglePopup, object: nil, userInfo: userInfo)
     }
     
-    private func togglePopup() {
-        guard let popup = self.popup, let item = self.menuBarItem, let window = item.button?.window else { return }
+    @objc private func togglePopup() {
+        guard let item = self.menuBarItem, let popup = self.popup, let window = item.button?.window else { return }
         let openedWindows = NSApplication.shared.windows.filter{ $0 is NSPanel }
         openedWindows.forEach{ $0.setIsVisible(false) }
         
@@ -170,20 +263,6 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
             popup.setIsVisible(false)
         }
     }
-    
-    @objc private func listenForOneView(_ notification: Notification) {
-        guard notification.userInfo?["module"] == nil else { return }
-        
-        if self.status {
-            self.enable()
-        } else {
-            self.disable()
-        }
-    }
-    
-    @objc private func listenForModuleRearrrange() {
-        self.recalculate()
-    }
 }
 
 private class SeparatorLineView: NSView {
@@ -211,9 +290,11 @@ private class SeparatorLineView: NSView {
 private class Popup: NSStackView, Popup_p {
     fileprivate var keyboardShortcut: [UInt16] = []
     fileprivate var sizeCallback: ((NSSize) -> Void)? = nil
+    private var modules: [Module] = []
     
-    init() {
+    init(modules: [Module]) {
         self.keyboardShortcut = Store.shared.array(key: "CombinedModules_popup_keyboardShortcut", defaultValue: []) as? [UInt16] ?? []
+        self.modules = modules
         
         super.init(frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 0))
         
@@ -232,7 +313,12 @@ private class Popup: NSStackView, Popup_p {
     }
     
     deinit {
-        NotificationCenter.default.removeObserver(self, name: .toggleOneView, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .toggleModule, object: nil)
+    }
+    
+    fileprivate func setModules(_ modules: [Module]) {
+        self.modules = modules
+        self.reinit()
     }
     
     fileprivate func settings() -> NSView? { return nil }
@@ -246,7 +332,7 @@ private class Popup: NSStackView, Popup_p {
     @objc private func reinit() {
         self.subviews.forEach({ $0.removeFromSuperview() })
         
-        let availableModules = modules.filter({ $0.enabled && $0.portal != nil })
+        let availableModules = self.modules.filter({ $0.enabled && $0.portal != nil })
         var modulesHeight: CGFloat = 0
         availableModules.forEach { (m: Module) in
             if let p = m.portal {

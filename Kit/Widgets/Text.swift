@@ -60,9 +60,9 @@ public class TextWidget: WidgetWrapper {
             with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
-        let width = (size.width+Constants.Widget.margin.x*2).roundedUpToNearestTen()
-        let origin: CGPoint = CGPoint(x: Constants.Widget.margin.x, y: ((Constants.Widget.height-valueSize-1)/2))
-        let rect = CGRect(x: origin.x, y: origin.y, width: width - (Constants.Widget.margin.x*2), height: valueSize)
+        let width = max(size.width, 45).rounded(.up) + 2
+        let origin: CGPoint = CGPoint(x: 0, y: ((Constants.Widget.height-valueSize-1)/2))
+        let rect = CGRect(x: origin.x, y: origin.y, width: width, height: valueSize)
         attributedString.draw(with: rect)
         
         self.setWidth(width)

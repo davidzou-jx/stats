@@ -26,10 +26,6 @@ public class Mini: WidgetWrapper {
     private var defaultLabel: String
     private var _label: String
     
-    private var width: CGFloat {
-        (self.labelState ? 28 : 33) + (2*Constants.Widget.margin.x)
-    }
-    
     private var alignment: NSTextAlignment {
         if let alignmentPair = Alignments.first(where: { $0.key == self.alignmentState }) {
             return alignmentPair.additional as? NSTextAlignment ?? .left
@@ -106,6 +102,14 @@ public class Mini: WidgetWrapper {
         }
         
         let valueSize: CGFloat = self.labelState ? 12 : 14
+        let valueFont = NSFont.monospacedDigitSystemFont(ofSize: valueSize, weight: .regular)
+        let valueString = "\(Int(value.rounded(toPlaces: 2) * 100))\(suffix)"
+        let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 7, weight: .light)
+        let labelWidth = self.labelState ? label.widthOfString(usingFont: labelFont) : 0
+        let valueWidth = valueString.widthOfString(usingFont: valueFont)
+        let floor: CGFloat = self.labelState ? 29 : 33
+        let widgetWidth = max(floor, max(valueWidth, labelWidth).rounded(.up) + 2)
+        
         var origin: CGPoint = CGPoint(x: Constants.Widget.margin.x, y: (Constants.Widget.height-valueSize)/2)
         let style = NSMutableParagraphStyle()
         style.alignment = self.labelState ? self.alignment : .center
@@ -115,11 +119,11 @@ public class Mini: WidgetWrapper {
             style.alignment = self.alignment
             
             let stringAttributes = [
-                NSAttributedString.Key.font: NSFont.monospacedDigitSystemFont(ofSize: 7, weight: .light),
+                NSAttributedString.Key.font: labelFont,
                 NSAttributedString.Key.foregroundColor: isDarkMode ? NSColor.white : NSColor.textColor,
                 NSAttributedString.Key.paragraphStyle: style
             ]
-            let rect = CGRect(x: origin.x, y: 12, width: self.width - (Constants.Widget.margin.x*2), height: 7)
+            let rect = CGRect(x: origin.x, y: 12, width: widgetWidth - (Constants.Widget.margin.x*2), height: 7)
             let str = NSAttributedString.init(string: label, attributes: stringAttributes)
             str.draw(with: rect)
             
@@ -136,15 +140,15 @@ public class Mini: WidgetWrapper {
         }
         
         let stringAttributes = [
-            NSAttributedString.Key.font: NSFont.monospacedDigitSystemFont(ofSize: valueSize, weight: .regular),
+            NSAttributedString.Key.font: valueFont,
             NSAttributedString.Key.foregroundColor: color,
             NSAttributedString.Key.paragraphStyle: style
         ]
-        let rect = CGRect(x: origin.x, y: origin.y, width: self.width - (Constants.Widget.margin.x*2), height: valueSize+1)
-        let str = NSAttributedString.init(string: "\(Int(value.rounded(toPlaces: 2) * 100))\(suffix)", attributes: stringAttributes)
+        let rect = CGRect(x: origin.x, y: origin.y, width: widgetWidth - (Constants.Widget.margin.x*2), height: valueSize+1)
+        let str = NSAttributedString.init(string: valueString, attributes: stringAttributes)
         str.draw(with: rect)
         
-        self.setWidth(width)
+        self.setWidth(widgetWidth)
     }
     
     public func setValue(_ newValue: Double) {

@@ -91,11 +91,11 @@ public enum widget_t: String {
                 }
             case is BarChart:
                 if module == "GPU" || module == "RAM" || module == "Disk" || module == "Battery" {
-                    width = 11 + (Constants.Widget.margin.x*2)
+                    width = 9 + (Constants.Widget.margin.x*2)
                 } else if module == "Sensors" {
-                    width = 22 + (Constants.Widget.margin.x*2)
+                    width = 17 + (Constants.Widget.margin.x*2)
                 } else if module == "CPU" {
-                    width = 30 + (Constants.Widget.margin.x*2)
+                    width = 25 + (Constants.Widget.margin.x*2)
                 }
             case is StackWidget:
                 if module == "Sensors" {
@@ -388,8 +388,8 @@ public class MenuBar {
     private var menuBarItem: NSStatusItem? = nil
     private var queue: DispatchQueue
     
-    private var combinedModules: Bool {
-        Store.shared.bool(key: "CombinedModules", defaultValue: false)
+    private var combinedGroupID: Int? {
+        CombinedGroups.shared.groupID(for: self.moduleName)
     }
     
     public var view: MenuBarView = MenuBarView()
@@ -419,7 +419,7 @@ public class MenuBar {
         self.oneView = Store.shared.bool(key: "\(self.moduleName)_oneView", defaultValue: self.oneView)
         self.view.identifier = NSUserInterfaceItemIdentifier(rawValue: moduleName)
         
-        if self.combinedModules {
+        if self.combinedGroupID != nil {
             self.oneView = true
         } else {
             self.setupMenuBarItem(self.oneView)
@@ -427,11 +427,13 @@ public class MenuBar {
         
         NotificationCenter.default.addObserver(self, selector: #selector(listenForOneView), name: .toggleOneView, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(listenForWidgetRearrange), name: .widgetRearrange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(listenForCombinedGroupsChanged), name: .combinedGroupsChanged, object: nil)
     }
     
     deinit {
         NotificationCenter.default.removeObserver(self, name: .toggleOneView, object: nil)
         NotificationCenter.default.removeObserver(self, name: .widgetRearrange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .combinedGroupsChanged, object: nil)
     }
     
     public func append(_ widget: SWidget) {
@@ -465,7 +467,10 @@ public class MenuBar {
     }
     
     public func enable() {
-        if self.oneView && !self.combinedModules {
+        if self.combinedGroupID != nil {
+            self.oneView = true
+        }
+        if self.oneView && self.combinedGroupID == nil {
             self.setupMenuBarItem(true)
         }
         self.active = true
@@ -545,7 +550,7 @@ public class MenuBar {
             w.disable()
         }
         
-        if self.combinedModules {
+        if self.combinedGroupID != nil {
             self.oneView = true
             self.setupMenuBarItem(false)
         } else if self.active {
@@ -556,6 +561,10 @@ public class MenuBar {
         self.activeWidgets.forEach { (w: SWidget) in
             w.enable()
         }
+    }
+    
+    @objc private func listenForCombinedGroupsChanged() {
+        self.toggleOneView()
     }
     
     @objc private func listenForWidgetRearrange(_ notification: Notification) {

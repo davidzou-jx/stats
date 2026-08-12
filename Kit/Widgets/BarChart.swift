@@ -62,9 +62,9 @@ public class BarChart: WidgetWrapper {
         }
         
         super.init(.barChart, title: widgetTitle, frame: CGRect(
-            x: 0,
+            x: Constants.Widget.margin.x,
             y: Constants.Widget.margin.y,
-            width: Constants.Widget.width,
+            width: Constants.Widget.width + (2*Constants.Widget.margin.x),
             height: Constants.Widget.height - (2*Constants.Widget.margin.y)
         ))
         
@@ -121,28 +121,28 @@ public class BarChart: WidgetWrapper {
             return
         }
         
-        var width: CGFloat = 0
+        var width: CGFloat = Constants.Widget.margin.x*2
         var x: CGFloat = 0
         let lineWidth = 1 / (NSScreen.main?.backingScaleFactor ?? 1)
         let offset = lineWidth / 2
         
         switch value.count {
         case 0, 1:
-            width += 10 + (offset*2)
+            width += 8 + (offset*2)
         case 2:
-            width += 22
+            width += 16
         case 3...4: // 3,4
-            width += 30
+            width += 24
         case 5...8: // 5,6,7,8
-            width += 40
+            width += 32
         case 9...12: // 9..12
-            width += 50
+            width += 40
         case 13...16: // 13..16
-            width += 76
+            width += 56
         case 17...32: // 17..32
-            width += 84
+            width += 64
         default: // > 32
-            width += 118
+            width += 100
         }
         
         if self.labelState {
@@ -157,13 +157,13 @@ public class BarChart: WidgetWrapper {
             }
             
             width += letterWidth + Constants.Widget.spacing
-            x = letterWidth + Constants.Widget.spacing - Constants.Widget.margin.x
+            x = letterWidth + Constants.Widget.spacing + 1
         }
         
         let box = NSBezierPath(roundedRect: NSRect(
             x: x + offset,
             y: offset,
-            width: width - x - (offset*2),
+            width: width - x - (offset*2) - (Constants.Widget.margin.x*2),
             height: self.frame.size.height - (offset*2)
         ), xRadius: 2, yRadius: 2)
         

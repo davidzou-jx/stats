@@ -22,7 +22,7 @@ public class Label: WidgetWrapper {
         }
         
         super.init(.label, title: title, frame: CGRect(
-            x: -Constants.Widget.margin.x,
+            x: 0,
             y: Constants.Widget.margin.y,
             width: 6 + (2*Constants.Widget.margin.x),
             height: Constants.Widget.height - (2*Constants.Widget.margin.y)

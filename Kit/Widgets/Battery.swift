@@ -81,7 +81,7 @@ public class BatteryWidget: WidgetWrapper {
         }
         
         var width: CGFloat = 0
-        var x: CGFloat = Constants.Widget.margin.x
+        var x: CGFloat = 0
         let isShortTimeFormat: Bool = timeFormat == "short"
         
         if !self.hideAdditionalWhenFull || (self.hideAdditionalWhenFull && percentage != 1 && !optimizedCharging) {
@@ -260,7 +260,7 @@ public class BatteryWidget: WidgetWrapper {
             )
         }
         
-        self.setWidth(width + (2*Constants.Widget.margin.x))
+        self.setWidth(width)
     }
     
     private func drawOneRow(value: String, x: CGFloat) -> CGFloat {

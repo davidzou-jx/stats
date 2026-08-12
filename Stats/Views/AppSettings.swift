@@ -22,10 +22,6 @@ class ApplicationSettings: NSStackView {
         set { Store.shared.set(key: "temperature_units", value: newValue) }
     }
     
-    private var combinedModulesState: Bool {
-        get { Store.shared.bool(key: "CombinedModules", defaultValue: false) }
-        set { Store.shared.set(key: "CombinedModules", value: newValue) }
-    }
     private var combinedModulesSpacing: String {
         get { Store.shared.string(key: "CombinedModules_spacing", defaultValue: "none") }
         set { Store.shared.set(key: "CombinedModules_spacing", value: newValue) }
@@ -124,12 +120,20 @@ class ApplicationSettings: NSStackView {
             ))
         ]))
         
-        self.combinedModulesView = PreferencesSection([
-            PreferencesRow(localizedString("Combined modules"), component: switchView(
-                action: #selector(self.toggleCombinedModules),
-                state: self.combinedModulesState
-            )),
-            PreferencesRow(component: self.moduleSelector),
+        var combinedRows: [PreferencesRow] = [
+            PreferencesRow(component: self.moduleSelector)
+        ]
+        modules.filter({ $0.available }).sorted(by: { $0.name < $1.name }).forEach { (m: Module) in
+            combinedRows.append(PreferencesRow(
+                localizedString(m.name),
+                component: selectView(
+                    action: #selector(self.changeModuleGroup),
+                    items: self.combinedGroupOptions(for: m.name),
+                    selected: "\(m.name)|\(CombinedGroups.shared.groupID(for: m.name) ?? 0)"
+                )
+            ))
+        }
+        combinedRows.append(contentsOf: [
             PreferencesRow(localizedString("Spacing"), component: selectView(
                 action: #selector(self.toggleCombinedModulesSpacing),
                 items: CombinedModulesSpacings,
@@ -144,11 +148,8 @@ class ApplicationSettings: NSStackView {
                 state: self.combinedModulesPopup
             ))
         ])
+        self.combinedModulesView = PreferencesSection(combinedRows)
         scrollView.stackView.addArrangedSubview(self.combinedModulesView!)
-        self.combinedModulesView?.setRowVisibility(1, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(2, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(3, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(4, newState: self.combinedModulesState)
         
         self.remoteControlBtn = switchView(
             action: #selector(self.toggleRemoteControlState),
@@ -361,15 +362,20 @@ class ApplicationSettings: NSStackView {
         }
     }
     
-    @objc private func toggleCombinedModules(_ sender: NSButton) {
-        self.combinedModulesState = sender.state == NSControl.StateValue.on
-        self.combinedModulesView?.setRowVisibility(1, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(2, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(3, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(4, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(5, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(6, newState: self.combinedModulesState)
-        NotificationCenter.default.post(name: .toggleOneView, object: nil, userInfo: nil)
+    @objc private func changeModuleGroup(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        let parts = raw.split(separator: "|").map(String.init)
+        guard parts.count == 2, let id = Int(parts[1]) else { return }
+        CombinedGroups.shared.setGroup(id, for: parts[0])
+        NotificationCenter.default.post(name: .combinedGroupsChanged, object: nil, userInfo: ["module": parts[0]])
+    }
+    
+    private func combinedGroupOptions(for module: String) -> [KeyValue_t] {
+        var items = [KeyValue_t(key: "\(module)|0", value: "Standalone")]
+        for id in 1...4 {
+            items.append(KeyValue_t(key: "\(module)|\(id)", value: "Group \(id)"))
+        }
+        return items
     }
     
     @objc private func toggleCombinedModulesSpacing(_ sender: NSMenuItem) {
