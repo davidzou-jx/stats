@@ -2,9 +2,13 @@
 //  FanCurve.swift
 //  Sensors
 //
-//  Drives both fans from a JSON config file with multiple profiles. The config
-//  lives at ~/Library/Application Support/Stats/fan-curve.json and is re-read on
-//  every module tick, so edits hot-reload within a tick.
+//  Drives both fans from a JSON config file with multiple profiles, plus global
+//  per-app speed overrides ("appSpeeds") that apply regardless of the active
+//  profile. The config lives at ~/Library/Application Support/Stats/fan-curve.json
+//  and is re-read on every module tick, so edits hot-reload within a tick.
+//
+//  The final target is always the highest of: the interpolated curve speeds and
+//  any appSpeeds entries whose app is currently running.
 //
 
 import Cocoa
@@ -74,11 +78,14 @@ public class FanCurveController {
         }
 
         let target = FanCurveMath.targetSpeed(rules: profile.rules, keys: keys, names: names)
+        let appTarget = FanCurveMath.appTargetSpeed(appSpeeds: config.appSpeeds ?? [], runningApps: Self.runningApps())
+        let combined = max(target ?? 0, appTarget ?? 0)
+        let effective = (target == nil && appTarget == nil) ? nil : combined
         let fans = sensors.filter({ $0.type == .fan && !$0.isComputed }).compactMap({ $0 as? Fan })
 
-        if let target, !fans.isEmpty {
+        if let effective, !fans.isEmpty {
             fans.forEach { fan in
-                let clamped = min(Int(fan.maxSpeed), max(Int(fan.minSpeed), target))
+                let clamped = min(Int(fan.maxSpeed), max(Int(fan.minSpeed), effective))
                 if self.lastTargets[fan.id] != clamped {
                     SMCHelper.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
                     SMCHelper.shared.setFanSpeed(fan.id, speed: clamped)
@@ -125,6 +132,21 @@ public class FanCurveController {
         return FanCurveConfig.parse(data)
     }
 
+    /// Lowercased bundle identifiers and display names of all regular apps.
+    private static func runningApps() -> Set<String> {
+        var ids: Set<String> = []
+        NSWorkspace.shared.runningApplications.forEach { app in
+            guard app.activationPolicy == .regular else { return }
+            if let bundle = app.bundleIdentifier {
+                ids.insert(bundle.lowercased())
+            }
+            if let name = app.localizedName {
+                ids.insert(name.lowercased())
+            }
+        }
+        return ids
+    }
+
     private func write(_ config: FanCurveConfig) {
         let fm = FileManager.default
         let dir = self.configURL.deletingLastPathComponent()
@@ -169,6 +191,7 @@ public class FanCurveController {
                     FanCurvePoint(temp: 70, speed: 7000)
                 ])
             ])
-        ]
+        ],
+        appSpeeds: []
     )
 }

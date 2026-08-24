@@ -107,4 +107,52 @@ final class FanCurveTests: XCTestCase {
         let data = "{ not json".data(using: .utf8)!
         XCTAssertNil(FanCurveConfig.parse(data))
     }
+
+    func testAppSpeedMatchingIsCaseInsensitive() {
+        let appSpeeds = [FanCurveAppSpeed(app: "com.apple.Xcode", speed: 4500)]
+        XCTAssertEqual(FanCurveMath.appTargetSpeed(appSpeeds: appSpeeds, runningApps: ["com.apple.xcode"]), 4500)
+        XCTAssertEqual(FanCurveMath.appTargetSpeed(appSpeeds: appSpeeds, runningApps: ["xcode"]), nil)
+    }
+
+    func testAppSpeedMatchesDisplayName() {
+        let appSpeeds = [
+            FanCurveAppSpeed(app: "Xcode", speed: 4000),
+            FanCurveAppSpeed(app: "docker", speed: 5000)
+        ]
+        XCTAssertEqual(FanCurveMath.appTargetSpeed(appSpeeds: appSpeeds, runningApps: ["xcode", "docker"]), 5000)
+        XCTAssertEqual(FanCurveMath.appTargetSpeed(appSpeeds: appSpeeds, runningApps: ["finder"]), nil)
+    }
+
+    func testConfigParsingWithAppSpeeds() throws {
+        let json = """
+        {
+          "activeProfile": "Performance",
+          "appSpeeds": [
+            { "app": "com.apple.xcode", "speed": 4500 },
+            { "app": "Docker", "speed": 5000 }
+          ],
+          "profiles": [
+            { "name": "Performance", "rules": [] }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let config = FanCurveConfig.parse(json)
+        XCTAssertNotNil(config)
+        XCTAssertEqual(config?.appSpeeds?.count, 2)
+        XCTAssertEqual(config?.appSpeeds?.first?.app, "com.apple.xcode")
+        XCTAssertEqual(config?.appSpeeds?.first?.speed, 4500)
+    }
+
+    func testConfigWithoutAppSpeedsStillParses() throws {
+        let json = """
+        {
+          "profiles": [ { "name": "Quiet", "rules": [] } ]
+        }
+        """.data(using: .utf8)!
+
+        let config = FanCurveConfig.parse(json)
+        XCTAssertNotNil(config)
+        XCTAssertNil(config?.appSpeeds)
+    }
 }

@@ -40,13 +40,28 @@ public struct FanCurveProfile: Codable, Equatable {
     }
 }
 
+/// A fixed fan speed applied while a given app is running. Global across all
+/// profiles: matched case-insensitively against the app's bundle identifier or
+/// its display name (for example "com.apple.xcode" or "Xcode").
+public struct FanCurveAppSpeed: Codable, Equatable {
+    public var app: String
+    public var speed: Int
+
+    public init(app: String, speed: Int) {
+        self.app = app
+        self.speed = speed
+    }
+}
+
 public struct FanCurveConfig: Codable, Equatable {
     public var activeProfile: String?
     public var profiles: [FanCurveProfile]
+    public var appSpeeds: [FanCurveAppSpeed]?
 
-    public init(activeProfile: String? = nil, profiles: [FanCurveProfile]) {
+    public init(activeProfile: String? = nil, profiles: [FanCurveProfile], appSpeeds: [FanCurveAppSpeed]? = nil) {
         self.activeProfile = activeProfile
         self.profiles = profiles
+        self.appSpeeds = appSpeeds
     }
 
     /// The profile to use: the one named by `activeProfile`, or the first profile
@@ -127,6 +142,19 @@ public enum FanCurveMath {
             }
             if target == nil || speed > target! {
                 target = speed
+            }
+        }
+        return target
+    }
+
+    /// The speed for app overrides: the maximum configured speed among entries
+    /// whose `app` matches a currently running app. Nil when nothing matches.
+    /// `runningApps` is expected to be lowercased by the caller.
+    public static func appTargetSpeed(appSpeeds: [FanCurveAppSpeed], runningApps: Set<String>) -> Int? {
+        var target: Int?
+        for entry in appSpeeds where runningApps.contains(entry.app.lowercased()) {
+            if target == nil || entry.speed > target! {
+                target = entry.speed
             }
         }
         return target
