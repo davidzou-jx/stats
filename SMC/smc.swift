@@ -201,7 +201,7 @@ public class SMC {
         return IOServiceClose(conn)
     }
     
-    public func getValue(_ key: String) -> Double? {
+    public func getValue(_ key: String, allowZero: Bool = false) -> Double? {
         var result: kern_return_t = 0
         var val: SMCVal_t = SMCVal_t(key)
         
@@ -212,7 +212,7 @@ public class SMC {
         }
         
         if val.dataSize > 0 {
-            if val.bytes.first(where: { $0 != 0 }) == nil && val.key != "FS! " && val.key != "F0Md" && val.key != "F1Md" && val.key != "F0md" && val.key != "F1md" {
+            if !allowZero && val.bytes.first(where: { $0 != 0 }) == nil && val.key != "FS! " && val.key != "F0Md" && val.key != "F1Md" && val.key != "F0md" && val.key != "F1md" {
                 return nil
             }
             
@@ -537,9 +537,6 @@ public class SMC {
         }
         #endif
 
-        #if arch(arm64)
-        self.verifyAfterSettle("F\(id)Tg", expected: Double(speed))
-        #endif
     }
     
     // MARK: - Apple Silicon Fan Control
@@ -567,17 +564,6 @@ public class SMC {
         return false
     }
 
-    /// SMC writes apply asynchronously on current firmware: an immediate read-back
-    /// still returns the old value. Verify the write after a settle window and only
-    /// log a warning on mismatch (the write itself already returned success).
-    private func verifyAfterSettle(_ key: String, expected: Double) {
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            guard let self, let value = self.getValue(key) else { return }
-            if abs(value - expected) > 1 {
-                print("SMC write verification: \(key) expected \(expected), read \(value)")
-            }
-        }
-    }
     
     private func unlockFanControl(fanId: Int) -> Bool {
         // Try direct mode write first (works on M5+ without Ftst)
@@ -610,7 +596,7 @@ public class SMC {
         }
         
         // Wait for thermalmonitord to yield control
-        usleep(3_000_000)
+        usleep(1_000_000)
         
         return retryModeWrite(fanId: fanId, maxAttempts: 300)
     }

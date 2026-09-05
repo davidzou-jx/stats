@@ -20,35 +20,109 @@ public class FanCurveController {
     private var enabled = false
     private var sensors: [Sensor_p] = []
     private var lastTargets: [Int: Int] = [:]
-    private var lastFailureReset = false
+    private var generation = 0
+    private var pending: Set<Int> = []
+    private var lastApplied: [Int: TimeInterval] = [:]
+    private var invalidTemperatures: Set<String> = []
+    private var sampledAt: TimeInterval = 0
+    private var invalidatedAt: TimeInterval = 0
+    private var freshness: TimeInterval = 5
+    private var enabledAt: TimeInterval = 0
+    private var freshnessTimer: Timer?
+    public var pollingAvailable = true
+    private let configLocation: URL?
+    private let applyTargets: ([Int: Int], @escaping (Bool) -> Void) -> Void
+    private let restoreAutomatic: () -> Void
+    private let now: () -> TimeInterval
+
+    internal init(configURL: URL? = nil,
+                  applyTargets: @escaping ([Int: Int], @escaping (Bool) -> Void) -> Void = { SMCHelper.shared.setFanSpeeds($0, completion: $1) },
+                  restoreAutomatic: @escaping () -> Void = { SMCHelper.shared.resetFanControl() },
+                  now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.configLocation = configURL
+        self.applyTargets = applyTargets
+        self.restoreAutomatic = restoreAutomatic
+        self.now = now
+    }
+
+    deinit { self.freshnessTimer?.invalidate() }
 
     public private(set) var profileNames: [String] = []
     public private(set) var activeProfileName: String? = nil
 
     public var configURL: URL {
+        if let configLocation { return configLocation }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return support.appendingPathComponent("Stats").appendingPathComponent("fan-curve.json")
     }
 
     public func setEnabled(_ value: Bool) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { self.setEnabled(value) }
+            return
+        }
         guard self.enabled != value else { return }
         self.enabled = value
+        self.generation += 1
+        self.pending = []
         self.lastTargets = [:]
-        if !value {
-            self.lastFailureReset = false
+        self.lastApplied = [:]
+        self.freshnessTimer?.invalidate()
+        self.freshnessTimer = nil
+        if value {
+            self.enabledAt = self.now()
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                self?.checkFreshness()
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            self.freshnessTimer = timer
+        }
+    }
+
+    internal func checkFreshness() {
+        if self.enabled && self.now() - max(self.sampledAt, self.enabledAt) > self.freshness {
+            self.failSafe()
         }
     }
 
     /// Clear applied targets so the next tick rewrites the fans (used after wake
     /// or when switching profiles).
     public func reapply() {
+        self.generation += 1
+        self.pending = []
         self.lastTargets = [:]
-        self.update(self.sensors)
+        self.evaluate()
     }
 
-    public func update(_ sensors: [Sensor_p]) {
+    public func invalidateSamples() {
+        self.invalidatedAt = self.now()
+        self.sampledAt = 0
+    }
+
+    public func update(_ sensors: [Sensor_p], invalidTemperatures: Set<String>, sampledAt: TimeInterval, freshness: TimeInterval) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard sampledAt >= self.invalidatedAt else { return }
         self.sensors = sensors
+        self.invalidTemperatures = invalidTemperatures
+        self.sampledAt = sampledAt
+        self.freshness = freshness
+        self.evaluate()
+    }
+
+    private func failSafe() {
+        self.setEnabled(false)
+        self.resetAutomatic()
+        NotificationCenter.default.post(name: Notification.Name("SensorsFanControlUnavailable"), object: nil)
+    }
+
+    private func evaluate() {
         guard self.enabled else { return }
+        // Startup/wake must wait for a new sample rather than use cached data.
+        guard self.sampledAt > 0 else { return }
+        guard self.pollingAvailable, self.now() - self.sampledAt <= self.freshness else {
+            self.failSafe()
+            return
+        }
 
         let config: FanCurveConfig?
         if let data = try? Data(contentsOf: self.configURL) {
@@ -59,22 +133,25 @@ public class FanCurveController {
 
         guard let config, let profile = config.active, !profile.rules.isEmpty else {
             // Missing or invalid config: stop custom control and restore automatic.
-            if !self.lastFailureReset {
-                self.lastFailureReset = true
-                self.lastTargets = [:]
-                self.resetAutomatic()
-            }
+            self.failSafe()
             self.publish(profileNames: [], active: nil)
             return
         }
-        self.lastFailureReset = false
 
         var keys: [String: Double] = [:]
         var names: [String: Double] = [:]
         sensors.forEach { s in
-            guard s.type == .temperature else { return }
+            guard s.type == .temperature, !self.invalidTemperatures.contains(s.key),
+                  s.value.isFinite, (10...120).contains(s.value) else { return }
             keys[s.key.lowercased()] = s.value
             names[s.name.lowercased()] = s.value
+        }
+
+        // Every configured temperature rule must be healthy; an app override
+        // must not hide a failed thermal sensor.
+        guard profile.rules.allSatisfy({ FanCurveMath.temperature(for: $0, keys: keys, names: names) != nil }) else {
+            self.failSafe()
+            return
         }
 
         let target = FanCurveMath.targetSpeed(rules: profile.rules, keys: keys, names: names)
@@ -84,18 +161,41 @@ public class FanCurveController {
         let fans = sensors.filter({ $0.type == .fan && !$0.isComputed }).compactMap({ $0 as? Fan })
 
         if let effective, !fans.isEmpty {
+            var targets: [Int: Int] = [:]
             fans.forEach { fan in
+                guard fan.minSpeed.isFinite, fan.maxSpeed.isFinite,
+                      fan.minSpeed >= 0, fan.maxSpeed > 0, fan.maxSpeed <= 100_000,
+                      fan.minSpeed <= fan.maxSpeed else {
+                    self.failSafe()
+                    return
+                }
+                guard self.enabled, !self.pending.contains(fan.id) else { return }
                 let clamped = min(Int(fan.maxSpeed), max(Int(fan.minSpeed), effective))
-                if self.lastTargets[fan.id] != clamped {
-                    SMCHelper.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
-                    SMCHelper.shared.setFanSpeed(fan.id, speed: clamped)
-                    self.lastTargets[fan.id] = clamped
+                let previous = self.lastTargets[fan.id]
+                let elapsed = self.now() - (self.lastApplied[fan.id] ?? 0)
+                // Apply rises promptly; suppress tiny changes and rapid drops.
+                if previous == nil || elapsed >= 10 ||
+                    (abs(clamped - previous!) >= 100 && (clamped > previous! || elapsed >= 3)) {
+                    targets[fan.id] = clamped
                 }
             }
-        } else if !self.lastFailureReset {
-            self.lastFailureReset = true
-            self.lastTargets = [:]
-            self.resetAutomatic()
+            guard self.enabled, !targets.isEmpty else { return }
+            let generation = self.generation
+            self.pending.formUnion(targets.keys)
+            self.applyTargets(targets) { [weak self] success in
+                guard let self, self.generation == generation, self.enabled else { return }
+                self.pending.subtract(targets.keys)
+                if success {
+                    for (id, target) in targets {
+                        self.lastTargets[id] = target
+                        self.lastApplied[id] = self.now()
+                    }
+                } else {
+                    self.failSafe()
+                }
+            }
+        } else {
+            self.failSafe()
         }
 
         self.publish(profileNames: config.profiles.map({ $0.name }), active: config.activeProfile)
@@ -123,8 +223,7 @@ public class FanCurveController {
     }
 
     public func resetAutomatic() {
-        guard SMCHelper.shared.isActive() else { return }
-        SMCHelper.shared.resetFanControl()
+        self.restoreAutomatic()
     }
 
     private func currentConfig() -> FanCurveConfig? {
@@ -154,7 +253,7 @@ public class FanCurveController {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         guard let data = config.encoded() else { return }
-        try? data.write(to: self.configURL)
+        try? data.write(to: self.configURL, options: .atomic)
     }
 
     private func publish(profileNames: [String], active: String?) {
@@ -191,7 +290,6 @@ public class FanCurveController {
                     FanCurvePoint(temp: 70, speed: 7000)
                 ])
             ])
-        ],
-        appSpeeds: []
+        ]
     )
 }

@@ -77,7 +77,16 @@ public struct FanCurveConfig: Codable, Equatable {
 
     public static func parse(_ data: Data) -> FanCurveConfig? {
         let decoder = JSONDecoder()
-        return try? decoder.decode(FanCurveConfig.self, from: data)
+        guard let config = try? decoder.decode(FanCurveConfig.self, from: data),
+              config.profiles.allSatisfy({ profile in
+                  profile.rules.allSatisfy { rule in
+                      !rule.points.isEmpty && rule.points.allSatisfy {
+                          $0.temp.isFinite && (0...150).contains($0.temp) && (0...100_000).contains($0.speed)
+                      } && Set(rule.points.map { $0.temp }).count == rule.points.count
+                  }
+              }),
+              (config.appSpeeds ?? []).allSatisfy({ (0...100_000).contains($0.speed) }) else { return nil }
+        return config
     }
 
     public func encoded() -> Data? {
@@ -92,6 +101,9 @@ public enum FanCurveMath {
     /// Below the first point the first speed is used, above the last point the
     /// last speed is used (clamp, no extrapolation). Returns nil for < 2 points.
     public static func interpolate(_ points: [FanCurvePoint], temperature: Double) -> Int? {
+        guard temperature.isFinite, points.allSatisfy({
+            $0.temp.isFinite && (0...150).contains($0.temp) && (0...100_000).contains($0.speed)
+        }), Set(points.map { $0.temp }).count == points.count else { return nil }
         guard points.count >= 2 else {
             return points.first.map { $0.speed }
         }
@@ -111,7 +123,7 @@ public enum FanCurveMath {
             let p1 = sorted[i + 1]
             if temperature >= p0.temp && temperature <= p1.temp {
                 let ratio = (temperature - p0.temp) / (p1.temp - p0.temp)
-                let speed = Double(p0.speed) + Double(p1.speed - p0.speed) * ratio
+                let speed = Double(p0.speed) + (Double(p1.speed) - Double(p0.speed)) * ratio
                 return Int(speed.rounded())
             }
         }

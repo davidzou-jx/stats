@@ -1159,28 +1159,91 @@ public class SMCHelper {
     }
     
     private var connection: NSXPCConnection? = nil
+    private var fanHeartbeat: Timer?
+    private var resetRetry: DispatchWorkItem?
+    private var fanGeneration = 0
+
+    private func keepFanControlAlive() {
+        self.resetRetry?.cancel()
+        guard self.fanHeartbeat == nil else { return }
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            self?.helper(nil)?.heartbeat()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.fanHeartbeat = timer
+        self.helper(nil)?.heartbeat()
+    }
     
-    public func setFanSpeed(_ id: Int, speed: Int) {
-        guard let helper = self.helper(nil) else { return }
-        helper.setFanSpeed(id: id, value: speed) { result in
-            if let result, !result.isEmpty {
-                NSLog("set fan speed: \(result)")
+    public func setFanSpeed(_ id: Int, speed: Int, completion: @escaping (Bool) -> Void = { _ in }) {
+        self.setFanSpeeds([id: speed], completion: completion)
+    }
+
+    public func setFanSpeeds(_ targets: [Int: Int], completion: @escaping (Bool) -> Void = { _ in }) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.setFanSpeeds(targets, completion: completion) }
+            return
+        }
+        self.keepFanControlAlive()
+        self.fanGeneration += 1
+        let generation = self.fanGeneration
+        var completed = false
+        let finished: (Bool) -> Void = { success in
+            DispatchQueue.main.async {
+                guard !completed else { return }
+                completed = true
+                guard self.fanGeneration == generation else { completion(false); return }
+                if !success {
+                    self.resetFanControl()
+                    NotificationCenter.default.post(name: Notification.Name("SensorsFanControlUnavailable"), object: nil)
+                }
+                completion(success)
             }
         }
+        guard let helper = self.helper({ success in if !success { finished(false) } }) else { return }
+        let ids = targets.keys.sorted()
+        helper.setFanSpeeds(ids: ids, values: ids.map { targets[$0]! }) { finished($0 != nil) }
     }
     
     public func setFanMode(_ id: Int, mode: Int) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.setFanMode(id, mode: mode) }
+            return
+        }
+        if mode == 1 { self.keepFanControlAlive() }
+        let generation = self.fanGeneration
         guard let helper = self.helper(nil) else { return }
         helper.setFanMode(id: id, mode: mode) { result in
-            if let result, !result.isEmpty {
-                NSLog("set fan mode: \(result)")
+            DispatchQueue.main.async {
+                guard self.fanGeneration == generation else { return }
+                if result == nil {
+                    self.resetFanControl()
+                    NotificationCenter.default.post(name: Notification.Name("SensorsFanControlUnavailable"), object: nil)
+                }
             }
         }
     }
     
-    public func resetFanControl() {
-        guard let helper = self.helper(nil) else { return }
-        helper.resetFanControl { _ in }
+    public func resetFanControl(completion: @escaping (Bool) -> Void = { _ in }) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.resetFanControl(completion: completion) }
+            return
+        }
+        self.fanGeneration += 1
+        let generation = self.fanGeneration
+        self.fanHeartbeat?.invalidate()
+        self.fanHeartbeat = nil
+        self.resetRetry?.cancel()
+        let finished: (Bool) -> Void = { success in
+            DispatchQueue.main.async {
+                completion(success)
+                guard !success, self.fanGeneration == generation, self.fanHeartbeat == nil else { return }
+                let retry = DispatchWorkItem { self.resetFanControl() }
+                self.resetRetry = retry
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: retry)
+            }
+        }
+        guard let helper = self.helper({ success in if !success { finished(false) } }) else { return }
+        helper.resetFanControl { finished($0 != nil) }
     }
     
     public func isActive() -> Bool {
@@ -1367,6 +1430,7 @@ public class SMCHelper {
         }
         guard let service = helper.remoteObjectProxyWithErrorHandler({ error in
             print(error)
+            DispatchQueue.main.async { completion?(false) }
         }) as? HelperProtocol else {
             completion?(false)
             return nil

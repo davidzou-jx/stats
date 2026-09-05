@@ -105,7 +105,6 @@ public class Sensors: Module {
     private func usageCallback(_ raw: Sensors_List?) {
         guard let value = raw, self.enabled else { return }
         
-        FanCurveController.shared.update(value.sensors)
         self.popupView.usageCallback(value.sensors)
         self.portalView.usageCallback(value.sensors)
         self.notificationsView.usageCallback(value.sensors)

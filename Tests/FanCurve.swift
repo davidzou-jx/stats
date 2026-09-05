@@ -108,6 +108,15 @@ final class FanCurveTests: XCTestCase {
         XCTAssertNil(FanCurveConfig.parse(data))
     }
 
+    func testUnsafeNumericValuesAreRejected() {
+        let extreme = self.points([(50, Int.min), (90, Int.max)])
+        XCTAssertNil(FanCurveMath.interpolate(extreme, temperature: 70))
+        XCTAssertNil(FanCurveMath.interpolate(self.points([(50, 2000), (90, 6000)]), temperature: .nan))
+        XCTAssertNil(FanCurveMath.interpolate(self.points([(50, 2000), (50, 3000)]), temperature: 50))
+        let config = FanCurveConfig(profiles: [FanCurveProfile(name: "Invalid", rules: [FanCurveRule(sensor: "cpu", points: extreme)])])
+        XCTAssertNil(FanCurveConfig.parse(config.encoded()!))
+    }
+
     func testAppSpeedMatchingIsCaseInsensitive() {
         let appSpeeds = [FanCurveAppSpeed(app: "com.apple.Xcode", speed: 4500)]
         XCTAssertEqual(FanCurveMath.appTargetSpeed(appSpeeds: appSpeeds, runningApps: ["com.apple.xcode"]), 4500)

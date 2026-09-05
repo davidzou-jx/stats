@@ -1099,6 +1099,8 @@ internal class FanView: NSStackView {
 /// Combined fan control: read-only rows for every fan plus a single shared
 /// control block (Automatic | Custom | Manual, one slider, profile picker).
 internal class FanControlView: NSStackView {
+    private var modeGeneration = 0
+    private var wakeTask: DispatchWorkItem?
     public var sizeCallback: (() -> Void)
 
     internal let fans: [Fan]
@@ -1198,16 +1200,14 @@ internal class FanControlView: NSStackView {
         NotificationCenter.default.addObserver(self, selector: #selector(self.controlCallback), name: .toggleFanControl, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.recheckHelperState), name: NSApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.profilesChanged), name: .fanCurveProfilesChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.fanControlUnavailable), name: Notification.Name("SensorsFanControlUnavailable"), object: nil)
 
-        if self.mode != .automatic && self.speedState {
-            if self.mode == .forced {
-                self.fans.forEach { SMCHelper.shared.setFanMode($0.id, mode: FanMode.forced.rawValue) }
-                if let speed = self.storedSpeed {
-                    self.fans.forEach { SMCHelper.shared.setFanSpeed($0.id, speed: speed) }
-                }
-            } else if self.mode == .custom {
-                FanCurveController.shared.setEnabled(true)
-                FanCurveController.shared.reapply()
+        if self.mode == .custom {
+            FanCurveController.shared.setEnabled(true)
+            FanCurveController.shared.reapply()
+        } else if self.mode == .forced && self.speedState {
+            if let speed = self.storedSpeed {
+                self.setSpeed(value: speed, delay: 1)
             }
         }
     }
@@ -1218,6 +1218,8 @@ internal class FanControlView: NSStackView {
 
     deinit {
         self.approvalPollTimer?.invalidate()
+        self.debouncer?.cancel()
+        self.wakeTask?.cancel()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
     }
@@ -1316,6 +1318,13 @@ internal class FanControlView: NSStackView {
     }
 
     private func applyMode(_ mode: FanMode) {
+        guard mode.isAutomatic || FanCurveController.shared.pollingAvailable else {
+            self.modeButtons?.setMode(.automatic)
+            return
+        }
+        self.modeGeneration += 1
+        self.wakeTask?.cancel()
+        self.debouncer?.cancel()
         self.mode = mode
         self.storedMode = mode
         self.fans.forEach { fan in
@@ -1330,10 +1339,15 @@ internal class FanControlView: NSStackView {
             SMCHelper.shared.resetFanControl()
         case .forced:
             FanCurveController.shared.setEnabled(false)
-            self.fans.forEach { SMCHelper.shared.setFanMode($0.id, mode: FanMode.forced.rawValue) }
         case .custom:
-            FanCurveController.shared.setEnabled(true)
-            FanCurveController.shared.reapply()
+            FanCurveController.shared.setEnabled(false)
+            let task = DispatchWorkItem { [weak self] in
+                guard let self, self.mode == .custom else { return }
+                FanCurveController.shared.setEnabled(true)
+                FanCurveController.shared.reapply()
+            }
+            self.debouncer = task
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: task)
         default:
             break
         }
@@ -1343,26 +1357,28 @@ internal class FanControlView: NSStackView {
     }
 
     private func applyOff() {
+        guard FanCurveController.shared.pollingAvailable else { self.modeButtons?.setMode(.automatic); return }
+        self.modeGeneration += 1
+        self.wakeTask?.cancel()
+        self.debouncer?.cancel()
         self.mode = .forced
         self.storedMode = .forced
         FanCurveController.shared.setEnabled(false)
-        self.fans.forEach { fan in
-            SMCHelper.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
-            SMCHelper.shared.setFanSpeed(fan.id, speed: 0)
-        }
+        SMCHelper.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, 0) }))
         self.storedSpeed = 0
         self.toggleControlView(false)
         self.toggleProfileRow(false)
     }
 
     private func applyTurbo() {
+        guard FanCurveController.shared.pollingAvailable else { self.modeButtons?.setMode(.automatic); return }
+        self.modeGeneration += 1
+        self.wakeTask?.cancel()
+        self.debouncer?.cancel()
         self.mode = .forced
         self.storedMode = .forced
         FanCurveController.shared.setEnabled(false)
-        self.fans.forEach { fan in
-            SMCHelper.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
-            SMCHelper.shared.setFanSpeed(fan.id, speed: Int(fan.maxSpeed))
-        }
+        SMCHelper.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, Int($0.maxSpeed)) }))
         self.storedSpeed = Int(self.maxSpeed)
         self.toggleControlView(false)
         self.toggleProfileRow(false)
@@ -1511,13 +1527,9 @@ internal class FanControlView: NSStackView {
 
         if state {
             self.slider?.doubleValue = Double(self.storedSpeed ?? Int(self.fans.first?.value ?? 0))
-            if self.speedState {
-                self.setSpeed(value: Int(self.slider?.doubleValue ?? 0), then: {
-                    DispatchQueue.main.async {
-                        self.sliderValueField?.textColor = .systemBlue
-                    }
-                })
-            }
+            self.setSpeed(value: Int(self.slider?.doubleValue ?? 0), delay: 1, then: { [weak self] in
+                self?.sliderValueField?.textColor = .systemBlue
+            })
             self.addArrangedSubview(view)
         } else {
             self.sliderValueField?.stringValue = ""
@@ -1543,23 +1555,25 @@ internal class FanControlView: NSStackView {
         self.refreshSize()
     }
 
-    private func setSpeed(value: Int, then: @escaping () -> Void = {}) {
+    private func setSpeed(value: Int, delay: TimeInterval = 0.3, then: @escaping () -> Void = {}) {
+        self.modeGeneration += 1
         self.sliderValueField?.stringValue = "\(value) RPM"
         self.sliderValueField?.textColor = .secondaryLabelColor
         self.storedSpeed = value
 
         self.debouncer?.cancel()
 
+        let generation = self.modeGeneration
         let task = DispatchWorkItem { [weak self] in
-            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-                guard let self else { return }
-                self.fans.forEach { SMCHelper.shared.setFanSpeed($0.id, speed: value) }
+            guard let self, self.mode == .forced, self.modeGeneration == generation else { return }
+            SMCHelper.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, value) })) { [weak self] success in
+                guard let self, success, self.mode == .forced, self.modeGeneration == generation else { return }
                 then()
             }
         }
 
         self.debouncer = task
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + 0.3, execute: task)
+        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + delay, execute: task)
     }
 
     @objc private func sliderCallback(_ sender: NSSlider) {
@@ -1573,11 +1587,9 @@ internal class FanControlView: NSStackView {
         self.minBtn?.state = .off
         self.maxBtn?.state = .off
 
-        self.setSpeed(value: Int(value), then: {
-            DispatchQueue.main.async {
-                self.slider?.intValue = Int32(value)
-                self.sliderValueField?.textColor = .systemBlue
-            }
+        self.setSpeed(value: Int(value), then: { [weak self] in
+            self?.slider?.intValue = Int32(value)
+            self?.sliderValueField?.textColor = .systemBlue
         })
     }
 
@@ -1595,46 +1607,43 @@ internal class FanControlView: NSStackView {
 
     @objc private func wakeListener(aNotification: NSNotification) {
         self.resetModeAfterSleep = true
-
-        if self.speedState {
-            if let mode = self.willSleepMode, let speed = self.willSleepSpeed {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    guard let self else { return }
-                    self.mode = mode
-                    self.storedMode = mode
-                    self.modeButtons?.setMode(mode)
-                    switch mode {
-                    case .automatic:
-                        self.fans.forEach { SMCHelper.shared.setFanMode($0.id, mode: FanMode.automatic.rawValue) }
-                    case .forced:
-                        self.fans.forEach { SMCHelper.shared.setFanMode($0.id, mode: FanMode.forced.rawValue) }
-                        self.setSpeed(value: speed)
-                    case .custom:
-                        FanCurveController.shared.setEnabled(true)
-                        FanCurveController.shared.reapply()
-                    default:
-                        break
-                    }
-                    self.toggleControlView(mode == .forced)
-                    self.toggleProfileRow(mode == .custom)
-                }
-            }
-            self.willSleepMode = nil
-            self.willSleepSpeed = nil
+        self.wakeTask?.cancel()
+        let generation = self.modeGeneration
+        let mode = self.willSleepMode
+        let speed = self.willSleepSpeed
+        let task = DispatchWorkItem { [weak self] in
+            guard let self, self.modeGeneration == generation, let mode,
+                  mode == .custom || self.speedState else { return }
+            if mode == .forced, let speed { self.storedSpeed = speed }
+            self.modeButtons?.setMode(mode)
         }
-
-        if self.mode == .custom {
-            FanCurveController.shared.reapply()
-        }
+        self.wakeTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
+        self.willSleepMode = nil
+        self.willSleepSpeed = nil
     }
 
     @objc private func sleepListener(aNotification: NSNotification) {
         guard SMCHelper.shared.isActive(), !self.mode.isAutomatic else { return }
 
+        self.debouncer?.cancel()
+        self.wakeTask?.cancel()
+        self.modeGeneration += 1
         self.willSleepMode = self.mode
         self.willSleepSpeed = self.storedSpeed ?? Int(self.slider?.doubleValue ?? 0)
         FanCurveController.shared.setEnabled(false)
+        FanCurveController.shared.invalidateSamples()
         self.fans.forEach { SMCHelper.shared.setFanMode($0.id, mode: FanMode.automatic.rawValue) }
+        SMCHelper.shared.resetFanControl()
+        if self.mode != .custom {
+            self.modeButtons?.setMode(.automatic)
+        }
+    }
+
+    @objc private func fanControlUnavailable() {
+        FanCurveController.shared.setEnabled(false)
+        self.willSleepMode = nil
+        self.willSleepSpeed = nil
         self.modeButtons?.setMode(.automatic)
     }
 

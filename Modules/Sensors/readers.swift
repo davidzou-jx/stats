@@ -17,8 +17,9 @@ internal class SensorsReader: Reader<Sensors_List> {
     
     internal var list: Sensors_List = Sensors_List()
     
-    private var lastRead: TimeInterval = ProcessInfo.processInfo.systemUptime
-    private let firstRead: TimeInterval = ProcessInfo.processInfo.systemUptime
+    private var lastRead: Date = Date()
+    private let readLock = NSLock()
+    private let firstRead: Date = Date()
     private var lastIOSensorsRead: Date? = nil
     
     private var HIDState: Bool {
@@ -127,13 +128,22 @@ internal class SensorsReader: Reader<Sensors_List> {
     }
     
     public override func read() {
+        // Settings can request a read while the timer is already reading.
+        // Skip that duplicate rather than block the reader's scheduling queue.
+        guard self.readLock.try() else { return }
+        defer { self.readLock.unlock() }
+        let sampledAt = ProcessInfo.processInfo.systemUptime
         var sensors = self.list.sensors
+        var invalidTemperatures = Set(sensors.filter { $0.type == .temperature }.map { $0.key })
         
         for i in sensors.indices {
             guard sensors[i].group != .hid && !sensors[i].isComputed else { continue }
             if !self.unknownSensorsState && sensors[i].group == .unknown { continue }
             
             var newValue = SMC.shared.getValue(sensors[i].key) ?? 0
+            if sensors[i].type == .temperature, newValue.isFinite, (10...120).contains(newValue) {
+                invalidTemperatures.remove(sensors[i].key)
+            }
             if sensors[i].type == .temperature && sensors[i].group == .CPU &&
                 (newValue < 10 || newValue > 120) { // fix for m2 broken sensors
                 newValue = sensors[i].value
@@ -156,6 +166,9 @@ internal class SensorsReader: Reader<Sensors_List> {
                     
                     if let idx = sensors.firstIndex(where: { $0.group == .hid && $0.key == key }) {
                         sensors[idx].value = value
+                        if typ == .temperature, value.isFinite, (10...120).contains(value) {
+                            invalidTemperatures.remove(sensors[idx].key)
+                        }
                     }
                 }
             }
@@ -263,7 +276,48 @@ internal class SensorsReader: Reader<Sensors_List> {
             return list
         }
         
+        // Keep display fallbacks, but never use them as fresh control inputs.
+        let derivedGroups: [(String, [Sensor_p])] = [
+            ("CPU", sensors.filter { ($0.group == .CPU && $0.average && !$0.isComputed && $0.type == .temperature) || $0.key.hasPrefix("pACC MTR Temp") || $0.key.hasPrefix("eACC MTR Temp") }),
+            ("GPU", sensors.filter { ($0.group == .GPU && $0.average && !$0.isComputed && $0.type == .temperature) || $0.key.hasPrefix("GPU MTR Temp") }),
+            ("SOC", sensors.filter { $0.key.hasPrefix("SOC MTR Temp") })
+        ]
+        for (group, inputs) in derivedGroups where !inputs.isEmpty && inputs.allSatisfy({ !invalidTemperatures.contains($0.key) }) {
+            invalidTemperatures.remove("Average \(group)")
+            invalidTemperatures.remove("Hottest \(group)")
+        }
+        let snapshot = sensors
+        let invalid = invalidTemperatures
+        let freshness = max(5, (self.interval ?? 1) * 2 + 2)
+        DispatchQueue.main.async {
+            FanCurveController.shared.update(snapshot, invalidTemperatures: invalid, sampledAt: sampledAt, freshness: freshness)
+        }
         self.callback(self.list)
+    }
+
+    public override func pause() {
+        super.pause()
+        self.releaseFanControl()
+    }
+
+    public override func start() {
+        DispatchQueue.main.async { FanCurveController.shared.pollingAvailable = true }
+        super.start()
+    }
+
+    public override func stop() {
+        super.stop()
+        self.releaseFanControl()
+    }
+
+    private func releaseFanControl() {
+        DispatchQueue.main.async {
+            FanCurveController.shared.pollingAvailable = false
+            FanCurveController.shared.setEnabled(false)
+            FanCurveController.shared.invalidateSamples()
+            SMCHelper.shared.resetFanControl()
+            NotificationCenter.default.post(name: Notification.Name("SensorsFanControlUnavailable"), object: nil)
+        }
     }
     
     private func initCalculatedSensors(_ sensors: [Sensor_p]) -> [Sensor_p] {
