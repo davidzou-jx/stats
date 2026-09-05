@@ -242,9 +242,9 @@ internal class SensorsReader: Reader<Sensors_List> {
         }
         
         if let PSTRSensor = sensors.first(where: { $0.key == "PSTR"}), PSTRSensor.value > 0 {
-            let now = ProcessInfo.processInfo.systemUptime
-            let sinceLastRead = now - self.lastRead
-            let sinceFirstRead = now - self.firstRead
+            let now = Date()
+            let sinceLastRead = now.timeIntervalSince(self.lastRead)
+            let sinceFirstRead = now.timeIntervalSince(self.firstRead)
             
             if let totalIdx = sensors.firstIndex(where: {$0.key == "Total System Consumption"}), sinceLastRead > 0 {
                 sensors[totalIdx].value += PSTRSensor.value * sinceLastRead / 3600
