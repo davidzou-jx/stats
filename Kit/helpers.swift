@@ -649,32 +649,19 @@ public func toggleNSControlState(_ control: NSControl?, state: NSControl.StateVa
 }
 
 public func syncShell(_ args: String) -> String {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/bin/sh")
-    task.arguments = ["-c", args]
-    let pipe = Pipe()
-    
-    task.standardOutput = pipe
-    do {
-        try task.run()
-    } catch let err {
-        error("syncShell: \(err.localizedDescription)")
-        return ""
-    }
-    task.waitUntilExit()
-    
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let output = String(data: data, encoding: .utf8) ?? ""
-    
-    return output
+    let result = runCommand(path: "/bin/sh", arguments: ["-c", args])
+    guard result.succeeded else { return "" }
+    return String(data: result.output, encoding: .utf8) ?? ""
 }
 
 public func isNewestVersion(currentVersion: String, latestVersion: String) -> Bool {
     let currentNumber = currentVersion.replacingOccurrences(of: "v", with: "")
     let latestNumber = latestVersion.replacingOccurrences(of: "v", with: "")
     
-    let currentArray = currentNumber.condenseWhitespace().split(separator: ".")
-    let latestArray = latestNumber.condenseWhitespace().split(separator: ".")
+    var currentArray = currentNumber.condenseWhitespace().split(separator: ".")
+    var latestArray = latestNumber.condenseWhitespace().split(separator: ".")
+    while currentArray.count < 3 { currentArray.append("0") }
+    while latestArray.count < 3 { latestArray.append("0") }
     
     var current = Version(major: Int(currentArray[0]) ?? 0, minor: Int(currentArray[1]) ?? 0, patch: Int(currentArray[2]) ?? 0)
     var latest = Version(major: Int(latestArray[0]) ?? 0, minor: Int(latestArray[1]) ?? 0, patch: Int(latestArray[2]) ?? 0)
@@ -739,7 +726,7 @@ public func isNewestVersion(currentVersion: String, latestVersion: String) -> Bo
             return true
         }
         
-        if latest.patch >= current.patch && latest.minor >= current.minor && latest.major >= current.major {
+        if latest.patch > current.patch && latest.minor >= current.minor && latest.major >= current.major {
             return true
         }
         
@@ -1006,29 +993,10 @@ internal class WidgetLabelView: NSView {
     }
 }
 
-public func process(path: String, arguments: [String]) -> String? {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: path)
-    task.arguments = arguments
-    
-    let outputPipe = Pipe()
-    defer {
-        outputPipe.fileHandleForReading.closeFile()
-    }
-    task.standardOutput = outputPipe
-    
-    do {
-        try task.run()
-    } catch let error {
-        debug("system_profiler SPMemoryDataType: \(error.localizedDescription)")
-        return nil
-    }
-    
-    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-    let output = String(data: outputData, encoding: .utf8)
-    guard let output, !output.isEmpty else { return nil }
-    
-    return output
+public func process(path: String, arguments: [String], timeout: TimeInterval = 30) -> String? {
+    let result = runCommand(path: path, arguments: arguments, timeout: timeout)
+    guard result.succeeded, !result.output.isEmpty else { return nil }
+    return String(data: result.output, encoding: .utf8)
 }
 
 public func process(path: String, arguments: [String], environment: [String: String]? = nil, timeout: TimeInterval) -> String? {

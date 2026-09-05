@@ -38,7 +38,7 @@ internal class ClockReader: Reader<Date> {
         self.syncWithNTP()
     }
     
-    public override func read() {
+    public override func readValue() {
         let date = self.ntpSync ? self.now : Date()
         
         self.callback(date)

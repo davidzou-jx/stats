@@ -19,7 +19,7 @@ public final class DataReader: Reader<RemoteSnapshot> {
         self.interval = 60
     }
     
-    public override func read() {
+    public override func readValue() {
         guard SystemStats.shared.isAuthorized else {
             self.callback(nil)
             return

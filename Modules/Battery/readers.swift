@@ -57,7 +57,7 @@ internal class UsageReader: Reader<Battery_Usage> {
         CFRunLoopRemoveSource(runLoop, source, .defaultMode)
     }
     
-    public override func read() {
+    public override func readValue() {
         let psInfo = IOPSCopyPowerSourcesInfo().takeRetainedValue()
         let psList = IOPSCopyPowerSourcesList(psInfo).takeRetainedValue() as [CFTypeRef]
         
@@ -216,33 +216,15 @@ public class ProcessReader: Reader<[TopProcess]> {
         self.popup = true
     }
     
-    public override func read() {
+    public override func readValue() {
         if self.numberOfProcesses == 0 {
             return
         }
         
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/top")
-        task.arguments = ["-o", "power", "-l", "2", "-n", "\(self.numberOfProcesses)", "-stats", "pid,command,power"]
-        
-        let outputPipe = Pipe()
-        defer {
-            outputPipe.fileHandleForReading.closeFile()
-        }
-        task.standardOutput = outputPipe
-        
-        do {
-            try task.run()
-        } catch let err {
-            error("error read ps: \(err.localizedDescription)", log: self.log)
-            return
-        }
-        
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        if outputData.isEmpty {
-            return
-        }
-        
+        let result = runCommand(path: "/usr/bin/top", arguments: ["-o", "power", "-l", "2", "-n", "\(self.numberOfProcesses)", "-stats", "pid,command,power"])
+        guard result.succeeded, !result.output.isEmpty else { return }
+        let outputData = result.output
+
         let output = String(data: outputData.advanced(by: outputData.count/2), encoding: .utf8)
         guard let output, !output.isEmpty else { return }
         

@@ -18,7 +18,6 @@ internal class LoadReader: Reader<CPU_Load> {
     private var numCpuInfo: mach_msg_type_number_t = 0
     private var numPrevCpuInfo: mach_msg_type_number_t = 0
     private var numCPUs: uint = 0
-    private let CPUUsageLock: NSLock = NSLock()
     private var previousInfo = host_cpu_load_info()
     private var hasHyperthreadingCores = false
     
@@ -39,10 +38,16 @@ internal class LoadReader: Reader<CPU_Load> {
         self.cores = SystemKit.shared.device.info.cpu?.cores
     }
     
-    public override func read() {
+    deinit {
+        if let previous = self.prevCpuInfo {
+            vm_deallocate(mach_task_self_, vm_address_t(bitPattern: previous),
+                          vm_size_t(MemoryLayout<integer_t>.stride * Int(self.numPrevCpuInfo)))
+        }
+    }
+
+    public override func readValue() {
         let result: kern_return_t = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &self.numCPUsU, &self.cpuInfo, &self.numCpuInfo)
         if result == KERN_SUCCESS {
-            self.CPUUsageLock.lock()
             self.usagePerCore = []
             
             if let prevCpuInfo = self.prevCpuInfo {
@@ -63,7 +68,6 @@ internal class LoadReader: Reader<CPU_Load> {
                     }
                 }
             }
-            self.CPUUsageLock.unlock()
             
             let showHyperthratedCores = Store.shared.bool(key: "CPU_hyperhreading", defaultValue: false)
             if showHyperthratedCores || !self.hasHyperthreadingCores {
@@ -189,39 +193,13 @@ public class ProcessReader: Reader<[TopProcess]> {
         self.setInterval(Store.shared.int(key: "\(self.title)_updateTopInterval", defaultValue: 1))
     }
     
-    public override func read() {
+    public override func readValue() {
         if self.numberOfProcesses == 0 {
             return
         }
         
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/ps")
-        task.arguments = ["-Aceo pid,pcpu,comm", "-r"]
-        
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        
-        defer {
-            outputPipe.fileHandleForReading.closeFile()
-            errorPipe.fileHandleForReading.closeFile()
-        }
-        
-        task.standardOutput = outputPipe
-        task.standardError = errorPipe
-        
-        do {
-            try task.run()
-        } catch let err {
-            error("error read ps: \(err.localizedDescription)", log: self.log)
-            return
-        }
-        
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outputData, encoding: .utf8)
-        _ = String(data: errorData, encoding: .utf8)
-        guard let output, !output.isEmpty else { return }
-        
+        guard let output = process(path: "/bin/ps", arguments: ["-Aceo pid,pcpu,comm", "-r"]) else { return }
+
         var index = 0
         var processes: [TopProcess] = []
         output.enumerateLines { (line, stop) in
@@ -272,7 +250,7 @@ public class TemperatureReader: Reader<Double> {
         }
     }
     
-    public override func read() {
+    public override func readValue() {
         var temperature: Double? = nil
         
         if let value = SMC.shared.getValue("TC0D"), value < 110 {
@@ -348,7 +326,7 @@ public class FrequencyReader: Reader<CPU_Frequency> {
         dict?.release()
     }
     
-    public override func read() {
+    public override func readValue() {
         guard !self.isReading, !self.eCoreFreqs.isEmpty || !self.pCoreFreqs.isEmpty || !self.sCoreFreqs.isEmpty, self.channels != nil, self.subscription != nil else { return }
         self.isReading = true
         let minECoreFreq = Double(self.eCoreFreqs.min() ?? 0)
@@ -540,26 +518,8 @@ public class FrequencyReader: Reader<CPU_Frequency> {
 public class LimitReader: Reader<CPU_Limit> {
     private var limits: CPU_Limit = CPU_Limit()
     
-    public override func read() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-        task.arguments = ["-g", "therm"]
-        
-        let outputPipe = Pipe()
-        defer {
-            outputPipe.fileHandleForReading.closeFile()
-        }
-        task.standardOutput = outputPipe
-        
-        do {
-            try task.run()
-        } catch let err {
-            error("error read pmset: \(err.localizedDescription)", log: self.log)
-            return
-        }
-        
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        guard let str = String(data: outputData, encoding: .utf8) else { return }
+    public override func readValue() {
+        guard let str = process(path: "/usr/bin/pmset", arguments: ["-g", "therm"]) else { return }
         var lines = str.split(separator: "\n")
         guard lines.count > 3 else { return }
         lines.removeFirst(3)
@@ -589,28 +549,9 @@ public class AverageLoadReader: Reader<CPU_AverageLoad> {
         self.setInterval(15)
     }
     
-    public override func read() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/uptime")
-        
-        let outputPipe = Pipe()
-        defer {
-            outputPipe.fileHandleForReading.closeFile()
-        }
-        task.standardOutput = outputPipe
-        
-        do {
-            try task.run()
-        } catch let err {
-            error("error read uptime: \(err.localizedDescription)", log: self.log)
-            return
-        }
-        
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        guard let raw = String(data: outputData, encoding: .utf8), let line = raw.split(separator: "\n").first else {
-            return
-        }
-        
+    public override func readValue() {
+        guard let raw = process(path: "/usr/bin/uptime", arguments: []), let line = raw.split(separator: "\n").first else { return }
+
         let str = line.trimmingCharacters(in: .whitespaces)
         let strFind = str.findAndCrop(pattern: "(\\d+(.|,)\\d+ *){3}$")
         let strArr = strFind.cropped.split(separator: " ")

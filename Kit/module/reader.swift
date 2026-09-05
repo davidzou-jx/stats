@@ -126,19 +126,27 @@ open class Reader<T: Codable>: NSObject, ReaderInternal_p {
         }
     }
     
-    open func read() {}
+    private let scheduler = ReadScheduler()
+    /// Delegate-based readers use this queue for their mutable sampling state.
+    public var samplingQueue: DispatchQueue { self.scheduler.queue }
+
+    /// All refresh requests, including settings actions, run off the UI thread.
+    public final func read() {
+        self.scheduler.request { [weak self] in self?.readValue() }
+    }
+
+    open func readValue() {}
     open func setup() {}
     open func terminate() {}
     
     open func start() {
         if (self.popup || self.preview) && self.locked {
-            DispatchQueue.global(qos: .background).async {
-                self.read()
-            }
+            self.read()
             return
         }
         
         self.alignQueue.sync {
+            self.active = true
             if self.alignToSecondBoundary {
                 if self.repeatTask == nil {
                     self.startAlignedRepeater()
@@ -147,33 +155,33 @@ open class Reader<T: Codable>: NSObject, ReaderInternal_p {
                 }
             } else if !self.initlizalized {
                 self.startNormalRepeater()
-                DispatchQueue.global(qos: .background).async { self.read() }
+                self.read()
                 self.repeatTask?.start()
                 self.initlizalized = true
             } else {
                 self.repeatTask?.start()
             }
         }
-        
-        self.active = true
     }
     
     open func pause() {
         self.alignQueue.sync {
+            self.active = false
             self.alignGeneration &+= 1
             self.repeatTask?.pause()
+            self.scheduler.cancelPending()
         }
-        self.active = false
     }
     
     open func stop() {
         self.alignQueue.sync {
+            self.active = false
             self.alignGeneration &+= 1
             self.repeatTask?.pause()
             self.repeatTask = nil
             self.initlizalized = false
+            self.scheduler.cancelPending()
         }
-        self.active = false
     }
     
     public func setInterval(_ value: Int) {
@@ -214,7 +222,14 @@ open class Reader<T: Codable>: NSObject, ReaderInternal_p {
         }
         
         self.repeatTask = Repeater(seconds: Int(interval)) { [weak self] in
-            self?.read()
+            self?.readIfActive()
+        }
+    }
+
+    private func readIfActive() {
+        self.alignQueue.sync {
+            guard self.active else { return }
+            self.read()
         }
     }
     
@@ -230,9 +245,9 @@ open class Reader<T: Codable>: NSObject, ReaderInternal_p {
         self.alignQueue.asyncAfter(deadline: .now() + self.delayToNextSecondBoundary()) { [weak self] in
             guard let self, self.alignGeneration == generation, self.repeatTask == nil else { return }
 
-            DispatchQueue.global(qos: .background).async { self.read() }
+            self.read()
             self.repeatTask = Repeater(seconds: Int(interval)) { [weak self] in
-                self?.read()
+                self?.readIfActive()
             }
             self.repeatTask?.start()
         }

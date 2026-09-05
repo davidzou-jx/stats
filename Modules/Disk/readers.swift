@@ -45,12 +45,24 @@ let kIOATASMARTInterfaceID = CFUUIDGetConstantUUIDWithBytes(nil,
                                                             0x93, 0x5A, 0x76, 0xB2
 )
 
+internal enum SMARTConversion {
+    static func celsius(_ kelvin: UInt16) -> Int {
+        // Zero is the existing unknown-temperature sentinel used by ATA readers.
+        kelvin >= 273 ? Int(kelvin) - 273 : 0
+    }
+
+    static func bytes(_ units: Int64) -> Int64 {
+        let (value, overflow) = units.multipliedReportingOverflow(by: 512_000)
+        return overflow ? Int64.max : value
+    }
+}
+
 internal class CapacityReader: Reader<Disks> {
     internal var list: Disks = Disks()
     
     private var purgableSpace: [URL: (Date, Int64)] = [:]
     
-    public override func read() {
+    public override func readValue() {
         let keys: [URLResourceKey] = [.volumeNameKey]
         let removableState = Store.shared.bool(key: "Disk_removable", defaultValue: false)
         guard let paths = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) else {
@@ -177,7 +189,7 @@ internal class ActivityReader: Reader<Disks> {
         self.setInterval(1)
     }
     
-    public override func read() {
+    public override func readValue() {
         let keys: [URLResourceKey] = [.volumeNameKey]
         let removableState = Store.shared.bool(key: "Disk_removable", defaultValue: false)
         guard let paths = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys) else {
@@ -401,7 +413,7 @@ public class ProcessReader: Reader<[Disk_process]> {
         self.setInterval(1)
     }
     
-    public override func read() {
+    public override func readValue() {
         guard self.numberOfProcesses != 0, let output = runProcess(path: "/bin/ps", args: ["-Aceo pid,args", "-r"]) else { return }
         
         var snapshot = self.list
@@ -457,24 +469,7 @@ public class ProcessReader: Reader<[Disk_process]> {
 }
 
 private func runProcess(path: String, args: [String] = []) -> String? {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: path)
-    task.arguments = args
-    
-    let outputPipe = Pipe()
-    defer {
-        outputPipe.fileHandleForReading.closeFile()
-    }
-    task.standardOutput = outputPipe
-    
-    do {
-        try task.run()
-    } catch {
-        return nil
-    }
-    
-    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-    return String(data: outputData, encoding: .utf8)
+    process(path: path, arguments: args)
 }
 
 internal class SMARTReader: Reader<Disks> {
@@ -494,7 +489,7 @@ internal class SMARTReader: Reader<Disks> {
         self.setInterval(Store.shared.int(key: "\(ModuleType.disk.stringValue)_updateSMARTInterval", defaultValue: 30))
     }
     
-    public override func read() {
+    public override func readValue() {
         guard self.SMART else { return }
         
         let keys: [URLResourceKey] = [.volumeNameKey]
@@ -612,14 +607,10 @@ internal class SMARTReader: Reader<Disks> {
         var smartData: nvme_smart_log = nvme_smart_log()
         guard smart.pointee.SMARTReadData(smartInterface, &smartData) == kIOReturnSuccess else { return nil }
         
-        let temperatures: [UInt8] = [UInt8(smartData.temperature.1), UInt8(smartData.temperature.0)]
-        var temperature: UInt16 = 0
-        let data = NSData(bytes: temperatures, length: 2)
-        data.getBytes(&temperature, length: 2)
+        let kelvin = UInt16(smartData.temperature.0) | UInt16(smartData.temperature.1) << 8
         
         let dataUnitsRead = self.extractUInt128(smartData.data_units_read)
         let dataUnitsWritten = self.extractUInt128(smartData.data_units_written)
-        let bytesPerDataUnit: Int64 = 512 * 1000
         
         let powerCycles = withUnsafeBytes(of: smartData.power_cycles) { $0.load(as: UInt32.self) }
         let powerOnHours = withUnsafeBytes(of: smartData.power_on_hours) { $0.load(as: UInt32.self) }
@@ -627,10 +618,10 @@ internal class SMARTReader: Reader<Disks> {
         let mediaErrors = withUnsafeBytes(of: smartData.media_errors) { $0.load(as: UInt32.self) }
         
         return smart_t(
-            temperature: Int(UInt16(bigEndian: temperature) - 273),
+            temperature: SMARTConversion.celsius(kelvin),
             life: 100 - Int(smartData.percent_used),
-            totalRead: dataUnitsRead * bytesPerDataUnit,
-            totalWritten: dataUnitsWritten * bytesPerDataUnit,
+            totalRead: SMARTConversion.bytes(dataUnitsRead),
+            totalWritten: SMARTConversion.bytes(dataUnitsWritten),
             powerCycles: Int(powerCycles),
             powerOnHours: Int(powerOnHours),
             criticalWarning: Int(smartData.critical_warning),

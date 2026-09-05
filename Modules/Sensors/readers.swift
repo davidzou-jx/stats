@@ -127,7 +127,7 @@ internal class SensorsReader: Reader<Sensors_List> {
         return results
     }
     
-    public override func read() {
+    public override func readValue() {
         // Settings can request a read while the timer is already reading.
         // Skip that duplicate rather than block the reader's scheduling queue.
         guard self.readLock.try() else { return }

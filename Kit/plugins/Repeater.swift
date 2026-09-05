@@ -19,8 +19,11 @@ private enum RepeaterState {
 internal class Repeater {
     private var callback: (() -> Void)
     private var state: RepeaterState = .paused
+    private let stateLock = NSLock()
+    private var generation: UInt = 0
     
-    private var timer: DispatchSourceTimer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "eu.exelban.Stats.Repeater", qos: .default))
+    private let timerQueue = DispatchQueue(label: "eu.exelban.Stats.Repeater", qos: .default)
+    private lazy var timer: DispatchSourceTimer = DispatchSource.makeTimerSource(queue: self.timerQueue)
     
     internal init(seconds: Int, callback: @escaping (() -> Void)) {
         self.callback = callback
@@ -36,18 +39,21 @@ internal class Repeater {
         }
     }
     
-    private func setupTimer(_ interval: Int) {
+    private func setupTimer(_ seconds: Int) {
+        let interval = max(1, seconds)
         self.timer.schedule(
             deadline: DispatchTime.now() + Double(interval),
             repeating: .seconds(interval),
             leeway: .milliseconds(200)
         )
         self.timer.setEventHandler { [weak self] in
-            self?.callback()
+            self?.fire()
         }
     }
     
     internal func start() {
+        self.stateLock.lock()
+        defer { self.stateLock.unlock() }
         guard self.state == .paused else { return }
         
         self.timer.resume()
@@ -55,6 +61,9 @@ internal class Repeater {
     }
     
     internal func pause() {
+        self.stateLock.lock()
+        defer { self.stateLock.unlock() }
+        self.generation &+= 1
         guard self.state == .running else { return }
         
         self.timer.suspend()
@@ -62,15 +71,26 @@ internal class Repeater {
     }
     
     internal func reset(seconds: Int, restart: Bool = false) {
+        self.stateLock.lock()
+        defer { self.stateLock.unlock() }
+        self.generation &+= 1
+        let generation = self.generation
         if self.state == .running {
-            self.pause()
+            self.timer.suspend()
+            self.state = .paused
         }
-        
         self.setupTimer(seconds)
-        
         if restart {
-            self.callback()
-            self.start()
+            self.timer.resume()
+            self.state = .running
+            self.timerQueue.async { [weak self] in self?.fire(generation: generation) }
         }
+    }
+
+    private func fire(generation: UInt? = nil) {
+        self.stateLock.lock()
+        let shouldFire = self.state == .running && (generation == nil || generation == self.generation)
+        self.stateLock.unlock()
+        if shouldFire { self.callback() }
     }
 }

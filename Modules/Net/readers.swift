@@ -98,6 +98,28 @@ extension CWChannel {
     }
 }
 
+// Keep the original address storage: sockaddr_in6 is larger than sockaddr.
+internal func numericAddress(_ address: UnsafePointer<sockaddr>, into buffer: inout [CChar]) -> Bool {
+    let family = Int32(address.pointee.sa_family)
+    let expected = family == AF_INET ? MemoryLayout<sockaddr_in>.size : MemoryLayout<sockaddr_in6>.size
+    guard family == AF_INET || family == AF_INET6,
+          Int(address.pointee.sa_len) >= expected, !buffer.isEmpty else { return false }
+    return getnameinfo(address, socklen_t(address.pointee.sa_len), &buffer,
+                       socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0
+}
+
+private struct NetworkProcessSample {
+    let output: String
+    let time: Date
+}
+
+private let networkProcessSample = SharedSample<NetworkProcessSample> {
+    let result = runCommand(path: "/usr/bin/nettop", arguments: ["-P", "-L", "1", "-n", "-k", "time,interface,state,rx_dupe,rx_ooo,re-tx,rtt_avg,rcvsize,tx_win,tc_class,tc_mgt,cc_algo,P,C,R,W,arch"],
+                            environment: ["NSUnbufferedIO": "YES", "LC_ALL": "en_US.UTF-8"])
+    guard result.succeeded, let output = String(data: result.output, encoding: .utf8), !output.isEmpty else { return nil }
+    return NetworkProcessSample(output: output, time: Date())
+}
+
 internal class UsageReader: Reader<Network_Usage>, CWEventDelegate {
     private var reachability: Reachability = Reachability(start: true)
     private let variablesQueue = DispatchQueue(label: "eu.exelban.NetworkUsageReader")
@@ -257,7 +279,7 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate {
         self.wifiClient.delegate = nil
     }
     
-    public override func read() {
+    public override func readValue() {
         self.checkUsageReset()
         
         let interfaceID = self.interfaceID
@@ -371,15 +393,8 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate {
     }
     
     private func readProcessBandwidth() -> Bandwidth {
-        guard let output = process(
-            path: "/usr/bin/nettop",
-            arguments: ["-P", "-L", "1", "-n", "-k", "time,interface,state,rx_dupe,rx_ooo,re-tx,rtt_avg,rcvsize,tx_win,tc_class,tc_mgt,cc_algo,P,C,R,W,arch"],
-            environment: [
-                "NSUnbufferedIO": "YES",
-                "LC_ALL": "en_US.UTF-8"
-            ],
-            timeout: 5
-        ) else { return Bandwidth() }
+        guard let sample = networkProcessSample.read(consumer: "usage", maxAge: 0.25) else { return Bandwidth() }
+        let output = sample.output
         
         var totalUpload: Int64 = 0
         var totalDownload: Int64 = 0
@@ -545,11 +560,11 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate {
     
     private func getLocalIP(_ pointer: UnsafeMutablePointer<ifaddrs>) {
         guard let ifaAddr = pointer.pointee.ifa_addr else { return }
-        var addr = ifaAddr.pointee
+        let addr = ifaAddr.pointee
         guard addr.sa_family == UInt8(AF_INET) || addr.sa_family == UInt8(AF_INET6) else { return}
         
         var ip = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-        getnameinfo(&addr, socklen_t(addr.sa_len), &ip, socklen_t(ip.count), nil, socklen_t(0), NI_NUMERICHOST)
+        guard numericAddress(ifaAddr, into: &ip) else { return }
         
         let ipStr = String(cString: ip)
         if addr.sa_family == UInt8(AF_INET) && !ipStr.isEmpty {
@@ -569,7 +584,7 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate {
         }
         
         DispatchQueue.global(qos: .userInitiated).async {
-            let response = syncShell("curl -s -4 https://api.mac-stats.com/ip")
+            let response = process(path: "/usr/bin/curl", arguments: ["-s", "-4", "--connect-timeout", "5", "--max-time", "10", "https://api.mac-stats.com/ip"], timeout: 12) ?? ""
             if !response.isEmpty, let data = response.data(using: .utf8),
                let addr = try? JSONDecoder().decode(Addr_s.self, from: data) {
                 if let ip = addr.ipv4, self.isIPv4(ip) {
@@ -581,7 +596,7 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate {
             }
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            let response = syncShell("curl -s -6 https://api.mac-stats.com/ip")
+            let response = process(path: "/usr/bin/curl", arguments: ["-s", "-6", "--connect-timeout", "5", "--max-time", "10", "https://api.mac-stats.com/ip"], timeout: 12) ?? ""
             if !response.isEmpty, let data = response.data(using: .utf8),
                let addr = try? JSONDecoder().decode(Addr_s.self, from: data) {
                 if let ip = addr.ipv6, !self.isIPv4(ip) {
@@ -718,20 +733,13 @@ public class ProcessReader: Reader<[Network_Process]> {
         self.popup = true
     }
     
-    public override func read() {
+    public override func readValue() {
         if self.numberOfProcesses == 0 {
             return
         }
         
-        guard let output = process(
-            path: "/usr/bin/nettop",
-            arguments: ["-P", "-L", "1", "-n", "-k", "time,interface,state,rx_dupe,rx_ooo,re-tx,rtt_avg,rcvsize,tx_win,tc_class,tc_mgt,cc_algo,P,C,R,W,arch"],
-            environment: [
-                "NSUnbufferedIO": "YES",
-                "LC_ALL": "en_US.UTF-8"
-            ],
-            timeout: 5
-        ) else { return }
+        guard let sample = networkProcessSample.read(consumer: "processes", maxAge: 0.25) else { return }
+        let output = sample.output
         
         var list: [Network_Process] = []
         var firstLine = false
@@ -747,7 +755,7 @@ public class ProcessReader: Reader<[Network_Process]> {
             }
             
             var process = Network_Process()
-            process.time = Date()
+            process.time = sample.time
             
             let nameArray = parsedLine[0].split(separator: ".")
             if let pid = nameArray.last {
@@ -784,7 +792,7 @@ public class ProcessReader: Reader<[Network_Process]> {
                     
                     var download = p.download - pp.download
                     var upload = p.upload - pp.upload
-                    let time = download == 0 && upload == 0 ? pp.time : Date()
+                    let time = download == 0 && upload == 0 ? pp.time : sample.time
                     list[i].time = time
                     
                     if download < 0 {
@@ -936,7 +944,7 @@ internal class ConnectivityReader: Reader<Network_Connectivity> {
         }
     }
     
-    override func read() {
+    override func readValue() {
         if self.connectivityMode == .http {
             self.httpCheck()
         } else {

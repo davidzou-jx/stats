@@ -56,7 +56,7 @@ internal class DevicesReader: Reader<[BLEDevice]>, CBCentralManagerDelegate, CBP
     public override func start() {
         super.start()
         if self.manager == nil {
-            self.manager = CBCentralManager(delegate: self, queue: nil)
+            self.manager = CBCentralManager(delegate: self, queue: self.samplingQueue)
         }
     }
     
@@ -98,22 +98,17 @@ internal class DevicesReader: Reader<[BLEDevice]>, CBCentralManagerDelegate, CBP
         self.startScan(manager)
     }
     
-    public override func read() {
+    public override func readValue() {
         let hid = self.HIDDevices()
         let SPB = self.profilerDevices()
         var list = self.cacheDevices()
         let pmsetLevels = self.pmsetAccessoryLevels()
         
-        hid.forEach { v in
-            if !list.contains(where: {$0.address == v.address}) {
-                list.append(v)
-            }
+        var addresses = Set(list.map { $0.address })
+        for device in hid + SPB.0 where addresses.insert(device.address).inserted {
+            list.append(device)
         }
-        SPB.0.forEach { v in
-            if !list.contains(where: {$0.address == v.address}) {
-                list.append(v)
-            }
-        }
+        let byAddress = Dictionary(list.map { ($0.address, $0) }, uniquingKeysWith: { first, _ in first })
         
         let pairedDevices: [ioDevice] = IOBluetoothDevice.pairedDevices()?.compactMap({
             if let device = $0 as? IOBluetoothDevice, device.isPaired() || device.isConnected() {
@@ -129,7 +124,7 @@ internal class DevicesReader: Reader<[BLEDevice]>, CBCentralManagerDelegate, CBP
         }) ?? []
         
         pairedDevices.forEach { (device: ioDevice) in
-            guard let data = list.first(where: { $0.address == device.address }) else {
+            guard let data = byAddress[device.address] else {
                 return
             }
             
@@ -384,6 +379,8 @@ internal class DevicesReader: Reader<[BLEDevice]>, CBCentralManagerDelegate, CBP
     
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         self.devicesToRemove.append(peripheral.identifier)
+        self.bleLevels.removeValue(forKey: peripheral.identifier)
+        self.characteristicsDict.removeValue(forKey: peripheral.identifier)
     }
     
     // MARK: - CBPeripheral

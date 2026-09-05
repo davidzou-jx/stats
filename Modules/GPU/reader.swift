@@ -99,7 +99,7 @@ internal class InfoReader: Reader<GPUs> {
         }
     }
     
-    public override func read() {
+    public override func readValue() {
         guard let accelerators = fetchIOService(kIOAcceleratorClassName) else {
             return
         }

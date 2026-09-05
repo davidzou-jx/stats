@@ -361,25 +361,10 @@ public class Updater {
     }
 
     private func runProcess(_ launch: String, _ args: [String]) -> (output: String, error: String, exit: Int32) {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: launch)
-        task.arguments = args
-        let out = Pipe(), err = Pipe()
-        task.standardOutput = out
-        task.standardError = err
-        do {
-            try task.run()
-        } catch {
-            return ("", "runProcess: \(error.localizedDescription)", -1)
-        }
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        return (
-            String(data: outData, encoding: .utf8) ?? "",
-            String(data: errData, encoding: .utf8) ?? "",
-            task.terminationStatus
-        )
+        let result = runCommand(path: launch, arguments: args, timeout: 120)
+        return (String(data: result.output, encoding: .utf8) ?? "",
+                result.failure ?? String(data: result.error, encoding: .utf8) ?? "",
+                result.succeeded ? 0 : (result.exitCode == 0 ? -1 : result.exitCode))
     }
     
     private func copyFile(from: URL, to: URL, completionHandler: @escaping (_ path: String, _ error: Error?) -> Void) {
