@@ -19,15 +19,17 @@ brew install stats
 ```
 
 ### Uninstall
-Run the uninstall script bundled with the app (requires administrator privileges to remove the SMC helper):
+Run the uninstall script bundled with the app (administrator privileges may be required to remove the app or a legacy Stats helper):
 ```bash
 sh /Applications/Stats.app/Contents/Resources/Scripts/uninstall.sh
 ```
 The script quits Stats and removes:
 
-   - the SMC helper (`/Library/LaunchDaemons/eu.exelban.Stats.SMC.Helper.plist` and `/Library/PrivilegedHelperTools/eu.exelban.Stats.SMC.Helper`)
+   - any legacy Stats SMC helper left by an older build
    - `Stats.app`
    - application data and preferences (`~/Library/Application Support/Stats`, widget containers, and `eu.exelban.Stats` defaults)
+
+The standalone FanController is managed separately and is not removed with Stats.
 
 If the app has already been moved to the Trash, the script can be run directly from the repository:
 ```bash
@@ -41,6 +43,16 @@ Legacy version for older systems could be found [here](https://mac-stats.com/dow
 Stats is supported on macOS 12 (Monterey) and newer.
 Beta versions of macOS are not supported - only stable releases.
 
+## Local builds
+
+The Xcode targets in this fork use manual ad-hoc signing (`-`) with no development team. A local build therefore does not require an Apple Developer account:
+
+```bash
+xcodebuild -project Stats.xcodeproj -scheme Stats -configuration Debug -destination 'platform=macOS' build
+```
+
+Ad-hoc builds are not notarized and are intended for local use. The existing `make build` release workflow still assumes distribution credentials for notarization and stapling.
+
 ## Features
 Stats is an application that allows you to monitor your macOS system.
 
@@ -50,7 +62,7 @@ Stats is an application that allows you to monitor your macOS system.
  - Disk utilization
  - Network usage
  - Battery level
- - Fan's control (not maintained)
+ - Fan control through the standalone FanController service
  - Sensors information (Temperature/Voltage/Power)
  - Bluetooth devices
  - Multiple time zone clock
@@ -80,7 +92,7 @@ Due to a problem with high data load in the system process (`chronod`) responsib
 Stats tries to be efficient as it's possible. But reading some data periodically is not a cheap task. Each module has its own "price". So, if you want to reduce energy impact from the Stats you need to disable some Stats modules. The most inefficient modules are Sensors and Bluetooth. Disabling these modules could reduce CPU usage and power efficiency by up to 50% in some cases.
 
 ### Fan control
-Fan control is in legacy mode. It does not receive any updates or fixes. It's not dropped from the app just because in the old Macs it works pretty acceptable. I'm open to accepting fixed or improvements (via PR) for this feature in case someone would like to help with that. But have no option and time to provide support for this feature.
+This fork delegates all fan writes to the standalone FanController service over its authenticated Unix socket. Stats does not contain, install, or sign a privileged fan helper. Local FanController builds use an ad-hoc signature and do not require a paid Apple Developer account; macOS still requires administrator authorization once to install its root-owned launch daemon. Open **Stats Settings → FanController → Open setup guide** for installation and switch-over instructions.
 
 ### Sensors show incorrect CPU/GPU core count
 CPU/GPU sensors are simply thermal zones (sensors) on the CPU/GPU. They have no relation to the number of cores or specific cores.

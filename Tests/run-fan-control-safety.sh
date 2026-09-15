@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Run from the repository root after a Debug build. No app/helper is launched.
+# Run from the repository root after a Debug build. No app or controller is launched.
 fan_build_dir="${1:-/private/tmp/stats-fan-safety-build}"
 fan_test_dir="$(mktemp -d /private/tmp/stats-fan-tests.XXXXXX)"
 xcrun swiftc \

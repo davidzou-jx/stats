@@ -97,7 +97,7 @@ internal class Popup: PopupWrapper {
     #if arch(arm64)
     @objc private func checkFanModesAndResetFtst() {
         guard let view = self.fansControlView, view.mode.isAutomatic else { return }
-        SMCHelper.shared.resetFanControl()
+        FanController.shared.resetFanControl()
     }
     #endif
     
@@ -505,7 +505,7 @@ internal class FanView: NSStackView {
     internal var fan: Fan
     private var ready: Bool = false
     
-    private var helperView: NSView? = nil
+    private var controllerSetupView: NSView? = nil
     private var controlView: NSView? = nil
     private var buttonsView: NSView? = nil
     
@@ -533,9 +533,9 @@ internal class FanView: NSStackView {
     }
     private var resetModeAfterSleep: Bool = false
     private var controlState: Bool
-    private var helperInstalled: Bool = false
-    private var helperButton: NSButton? = nil
-    private var approvalPollTimer: Timer? = nil
+    private var controllerAvailable: Bool = false
+    private var controllerButton: NSButton? = nil
+    private var controllerPollTimer: Timer? = nil
     private var fanValue: FanValue {
         FanValue(rawValue: Store.shared.string(key: "Sensors_popup_fanValue", defaultValue: FanValue.percentage.rawValue)) ?? .percentage
     }
@@ -554,7 +554,7 @@ internal class FanView: NSStackView {
         
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 0))
         
-        self.helperView = self.noHelper()
+        self.controllerSetupView = self.controllerSetup()
         self.controlView = self.control()
         self.buttonsView = self.mode()
         
@@ -572,12 +572,12 @@ internal class FanView: NSStackView {
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(self.wakeListener), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(self.sleepListener), name: NSWorkspace.willSleepNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.syncFanSpeed), name: .syncFansControl, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(self.changeHelperState), name: .fanHelperState, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.changeControllerState), name: .fanControllerState, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.controlCallback), name: .toggleFanControl, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(self.recheckHelperState), name: NSApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.recheckControllerState), name: NSApplication.didBecomeActiveNotification, object: nil)
         
         if let fanMode = self.fan.customMode, self.speedState && fanMode != FanMode.automatic {
-            SMCHelper.shared.setFanMode(fan.id, mode: fanMode.rawValue)
+            FanController.shared.setFanMode(fan.id, mode: fanMode.rawValue)
             self.modeButtons?.setMode(FanMode(rawValue: fanMode.rawValue) ?? .automatic)
             
             self.setSpeed(value: Int(self.speed), then: { [weak self] in
@@ -593,10 +593,10 @@ internal class FanView: NSStackView {
     }
     
     deinit {
-        self.approvalPollTimer?.invalidate()
+        self.controllerPollTimer?.invalidate()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self, name: .syncFansControl, object: nil)
-        NotificationCenter.default.removeObserver(self, name: .fanHelperState, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .fanControllerState, object: nil)
         NotificationCenter.default.removeObserver(self, name: .toggleFanControl, object: nil)
         NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
     }
@@ -634,7 +634,7 @@ internal class FanView: NSStackView {
         self.addArrangedSubview(row)
     }
     
-    private func noHelper() -> NSView {
+    private func controllerSetup() -> NSView {
         let view: NSView = NSView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 30))
         view.heightAnchor.constraint(equalToConstant: view.bounds.height).isActive = true
         
@@ -654,12 +654,12 @@ internal class FanView: NSStackView {
         button.isBordered = false
         button.wantsLayer = true
         button.layer?.backgroundColor = NSColor.clear.cgColor
-        button.attributedTitle = NSAttributedString(string: localizedString("Install fan helper"), attributes: [
+        button.attributedTitle = NSAttributedString(string: localizedString("Set up FanController"), attributes: [
             .foregroundColor: NSColor.secondaryLabelColor,
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold)
         ])
-        button.action = #selector(self.installHelper)
-        self.helperButton = button
+        button.action = #selector(self.checkControllerAvailability)
+        self.controllerButton = button
         
         container.addArrangedSubview(button)
         view.addSubview(container)
@@ -681,7 +681,7 @@ internal class FanView: NSStackView {
             if let fan = self?.fan, mode == .automatic || fan.mode != mode {
                 self?.fan.mode = mode
                 self?.fan.customMode = mode
-                SMCHelper.shared.setFanMode(fan.id, mode: mode.rawValue)
+                FanController.shared.setFanMode(fan.id, mode: mode.rawValue)
             }
             self?.toggleControlView(mode == .forced)
         }
@@ -689,10 +689,10 @@ internal class FanView: NSStackView {
             if let fan = self?.fan {
                 if self?.fan.mode != .forced {
                     self?.fan.mode = .forced
-                    SMCHelper.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
+                    FanController.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
                 }
                 self?.fan.customMode = .forced
-                SMCHelper.shared.setFanSpeed(fan.id, speed: 0)
+                FanController.shared.setFanSpeed(fan.id, speed: 0)
                 self?.fan.customSpeed = 0
             }
             self?.toggleControlView(false)
@@ -701,10 +701,10 @@ internal class FanView: NSStackView {
             if let fan = self?.fan {
                 if self?.fan.mode != .forced {
                     self?.fan.mode = .forced
-                    SMCHelper.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
+                    FanController.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue)
                 }
                 self?.fan.customMode = .forced
-                SMCHelper.shared.setFanSpeed(fan.id, speed: Int(fan.maxSpeed))
+                FanController.shared.setFanSpeed(fan.id, speed: Int(fan.maxSpeed))
                 self?.fan.customSpeed = Int(fan.maxSpeed)
             }
             self?.toggleControlView(false)
@@ -834,7 +834,7 @@ internal class FanView: NSStackView {
         let task = DispatchWorkItem { [weak self] in
             DispatchQueue.global(qos: .userInteractive).async { [weak self] in
                 if let id = self?.fan.id {
-                    SMCHelper.shared.setFanSpeed(id, speed: value)
+                    FanController.shared.setFanSpeed(id, speed: value)
                 }
                 then()
             }
@@ -893,7 +893,7 @@ internal class FanView: NSStackView {
             if let mode = self.willSleepMode, let speed = self.willSleepSpeed {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                     guard let self else { return }
-                    SMCHelper.shared.setFanMode(self.fan.id, mode: mode.rawValue)
+                    FanController.shared.setFanMode(self.fan.id, mode: mode.rawValue)
                     self.modeButtons?.setMode(mode)
                     if !mode.isAutomatic {
                         self.setSpeed(value: speed, then: { [weak self] in
@@ -918,11 +918,11 @@ internal class FanView: NSStackView {
     }
     
     @objc private func sleepListener() {
-        guard SMCHelper.shared.isActive(), let mode = self.fan.customMode, !mode.isAutomatic else { return }
+        guard FanController.shared.isActive(), let mode = self.fan.customMode, !mode.isAutomatic else { return }
         
         self.willSleepMode = mode
         self.willSleepSpeed = self.fan.customSpeed
-        SMCHelper.shared.setFanMode(fan.id, mode: FanMode.automatic.rawValue)
+        FanController.shared.setFanMode(fan.id, mode: FanMode.automatic.rawValue)
         self.modeButtons?.setMode(.automatic)
     }
     
@@ -977,86 +977,63 @@ internal class FanView: NSStackView {
         })
     }
     
-    @objc private func installHelper() {
-        SMCHelper.shared.install { [weak self] state in
+    @objc private func checkControllerAvailability() {
+        FanController.shared.checkAvailability { [weak self] available in
             DispatchQueue.main.async {
-                switch state {
-                case .enabled:
-                    NotificationCenter.default.post(name: .fanHelperState, object: nil, userInfo: ["state": true])
-                case .requiresApproval:
-                    self?.showApprovalPending()
-                case .failed:
-                    self?.showInstallFailed()
-                    NotificationCenter.default.post(name: .fanHelperState, object: nil, userInfo: ["state": false])
+                if available {
+                    NotificationCenter.default.post(name: .fanControllerState, object: nil, userInfo: ["state": true])
+                } else {
+                    self?.showControllerUnavailable()
+                    self?.startControllerPolling()
+                    NotificationCenter.default.post(name: .fanControllerState, object: nil, userInfo: ["state": false])
                 }
             }
         }
     }
-    
-    @objc private func openLoginItems() {
-        SMCHelper.shared.openLoginItems()
-    }
-    
-    private func showApprovalPending() {
-        self.helperButton?.title = localizedString("Approve in System Settings ▸ Login Items")
-        self.helperButton?.action = #selector(self.openLoginItems)
-        
-        self.startApprovalPolling()
-        
+
+    private func showControllerUnavailable() {
         let alert = NSAlert()
-        alert.messageText = localizedString("Fan helper needs your approval")
-        alert.informativeText = localizedString("To control the fans, enable Stats in System Settings ▸ Login Items.")
-        alert.addButton(withTitle: localizedString("Open Login Items"))
+        alert.messageText = localizedString("FanController is unavailable")
+        alert.informativeText = localizedString("Install and start the standalone FanController, then return to Stats. Stats no longer installs a privileged fan helper.")
+        alert.addButton(withTitle: localizedString("Open setup guide"))
         alert.addButton(withTitle: localizedString("Cancel"))
         
         if alert.runModal() == .alertFirstButtonReturn {
-            SMCHelper.shared.openLoginItems()
+            FanController.shared.openSetupGuide()
         }
     }
     
-    private func showInstallFailed() {
-        let alert = NSAlert()
-        alert.messageText = localizedString("Could not enable the fan helper")
-        alert.informativeText = localizedString("Open System Settings ▸ Login Items, make sure Stats is allowed in the background, then try again.")
-        alert.addButton(withTitle: localizedString("Open Login Items"))
-        alert.addButton(withTitle: localizedString("Cancel"))
-        
-        if alert.runModal() == .alertFirstButtonReturn {
-            SMCHelper.shared.openLoginItems()
-        }
-    }
-    
-    private func startApprovalPolling() {
-        self.approvalPollTimer?.invalidate()
+    private func startControllerPolling() {
+        self.controllerPollTimer?.invalidate()
         var elapsed: TimeInterval = 0
-        self.approvalPollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
+        self.controllerPollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
             elapsed += 2
-            if SMCHelper.shared.isInstalled {
+            if FanController.shared.isAvailable {
                 timer.invalidate()
-                self?.approvalPollTimer = nil
+                self?.controllerPollTimer = nil
                 DispatchQueue.main.async {
-                    self?.helperButton?.title = localizedString("Install fan helper")
-                    self?.helperButton?.action = #selector(FanView.installHelper)
+                    self?.controllerButton?.title = localizedString("Set up FanController")
+                    self?.controllerButton?.action = #selector(FanView.checkControllerAvailability)
                     self?.setupControls(true)
                 }
             } else if elapsed >= 60 {
                 timer.invalidate()
-                self?.approvalPollTimer = nil
+                self?.controllerPollTimer = nil
             }
         }
     }
     
-    private func setupControls(_ isInstalled: Bool? = nil) {
-        let helperState = isInstalled ?? SMCHelper.shared.isInstalled
-        self.helperInstalled = helperState
+    private func setupControls(_ isAvailable: Bool? = nil) {
+        let controllerState = isAvailable ?? FanController.shared.isAvailable
+        self.controllerAvailable = controllerState
         
         if !self.controlState {
-            self.helperView?.removeFromSuperview()
+            self.controllerSetupView?.removeFromSuperview()
             self.controlView?.removeFromSuperview()
             self.buttonsView?.removeFromSuperview()
         } else {
-            if helperState {
-                self.helperView?.removeFromSuperview()
+            if controllerState {
+                self.controllerSetupView?.removeFromSuperview()
                 if self.fan.maxSpeed != self.fan.minSpeed, let v = self.buttonsView {
                     self.addArrangedSubview(v)
                 }
@@ -1066,7 +1043,7 @@ internal class FanView: NSStackView {
             } else {
                 self.buttonsView?.removeFromSuperview()
                 self.controlView?.removeFromSuperview()
-                if let v = self.helperView {
+                if let v = self.controllerSetupView {
                     self.addArrangedSubview(v)
                 }
             }
@@ -1077,13 +1054,13 @@ internal class FanView: NSStackView {
         self.sizeCallback()
     }
     
-    @objc private func changeHelperState(_ notification: Notification) {
+    @objc private func changeControllerState(_ notification: Notification) {
         guard let state = notification.userInfo?["state"] as? Bool else { return }
         self.setupControls(state)
     }
     
-    @objc private func recheckHelperState() {
-        guard SMCHelper.shared.isInstalled != self.helperInstalled else { return }
+    @objc private func recheckControllerState() {
+        guard FanController.shared.isAvailable != self.controllerAvailable else { return }
         self.setupControls()
     }
     
@@ -1107,7 +1084,7 @@ internal class FanControlView: NSStackView {
     internal private(set) var mode: FanMode
 
     private var ready: Bool = false
-    private var helperView: NSView? = nil
+    private var controllerSetupView: NSView? = nil
     private var controlView: NSView? = nil
     private var buttonsView: NSView? = nil
     private var profileRow: NSView? = nil
@@ -1126,9 +1103,9 @@ internal class FanControlView: NSStackView {
 
     private var speedState: Bool { Store.shared.bool(key: "Sensors_speed", defaultValue: false) }
     private var controlState: Bool
-    private var helperInstalled: Bool = false
-    private var helperButton: NSButton? = nil
-    private var approvalPollTimer: Timer? = nil
+    private var controllerAvailable: Bool = false
+    private var controllerButton: NSButton? = nil
+    private var controllerPollTimer: Timer? = nil
     private var resetModeAfterSleep: Bool = false
 
     private var fanValue: FanValue {
@@ -1178,7 +1155,7 @@ internal class FanControlView: NSStackView {
 
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 0))
 
-        self.helperView = self.noHelper()
+        self.controllerSetupView = self.controllerSetup()
         self.controlView = self.control()
         self.buttonsView = self.modeButtonsView()
         self.profileRow = self.profile()
@@ -1196,9 +1173,9 @@ internal class FanControlView: NSStackView {
 
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(self.wakeListener), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(self.sleepListener), name: NSWorkspace.willSleepNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(self.changeHelperState), name: .fanHelperState, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.changeControllerState), name: .fanControllerState, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.controlCallback), name: .toggleFanControl, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(self.recheckHelperState), name: NSApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.recheckControllerState), name: NSApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.profilesChanged), name: .fanCurveProfilesChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.fanControlUnavailable), name: Notification.Name("SensorsFanControlUnavailable"), object: nil)
 
@@ -1217,7 +1194,7 @@ internal class FanControlView: NSStackView {
     }
 
     deinit {
-        self.approvalPollTimer?.invalidate()
+        self.controllerPollTimer?.invalidate()
         self.debouncer?.cancel()
         self.wakeTask?.cancel()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -1260,7 +1237,7 @@ internal class FanControlView: NSStackView {
         }
     }
 
-    private func noHelper() -> NSView {
+    private func controllerSetup() -> NSView {
         let view: NSView = NSView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 30))
         view.heightAnchor.constraint(equalToConstant: view.bounds.height).isActive = true
 
@@ -1278,12 +1255,12 @@ internal class FanControlView: NSStackView {
         button.target = self
         button.wantsLayer = true
         button.layer?.backgroundColor = NSColor.clear.cgColor
-        button.attributedTitle = NSAttributedString(string: localizedString("Install fan helper"), attributes: [
+        button.attributedTitle = NSAttributedString(string: localizedString("Set up FanController"), attributes: [
             .foregroundColor: NSColor.secondaryLabelColor,
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold)
         ])
-        button.action = #selector(self.installHelper)
-        self.helperButton = button
+        button.action = #selector(self.checkControllerAvailability)
+        self.controllerButton = button
 
         container.addArrangedSubview(button)
         view.addSubview(container)
@@ -1335,8 +1312,8 @@ internal class FanControlView: NSStackView {
         switch mode {
         case .automatic:
             FanCurveController.shared.setEnabled(false)
-            self.fans.forEach { SMCHelper.shared.setFanMode($0.id, mode: FanMode.automatic.rawValue) }
-            SMCHelper.shared.resetFanControl()
+            self.fans.forEach { FanController.shared.setFanMode($0.id, mode: FanMode.automatic.rawValue) }
+            FanController.shared.resetFanControl()
         case .forced:
             FanCurveController.shared.setEnabled(false)
         case .custom:
@@ -1364,7 +1341,7 @@ internal class FanControlView: NSStackView {
         self.mode = .forced
         self.storedMode = .forced
         FanCurveController.shared.setEnabled(false)
-        SMCHelper.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, 0) }))
+        FanController.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, 0) }))
         self.storedSpeed = 0
         self.toggleControlView(false)
         self.toggleProfileRow(false)
@@ -1378,7 +1355,7 @@ internal class FanControlView: NSStackView {
         self.mode = .forced
         self.storedMode = .forced
         FanCurveController.shared.setEnabled(false)
-        SMCHelper.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, Int($0.maxSpeed)) }))
+        FanController.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, Int($0.maxSpeed)) }))
         self.storedSpeed = Int(self.maxSpeed)
         self.toggleControlView(false)
         self.toggleProfileRow(false)
@@ -1566,7 +1543,7 @@ internal class FanControlView: NSStackView {
         let generation = self.modeGeneration
         let task = DispatchWorkItem { [weak self] in
             guard let self, self.mode == .forced, self.modeGeneration == generation else { return }
-            SMCHelper.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, value) })) { [weak self] success in
+            FanController.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, value) })) { [weak self] success in
                 guard let self, success, self.mode == .forced, self.modeGeneration == generation else { return }
                 then()
             }
@@ -1624,7 +1601,7 @@ internal class FanControlView: NSStackView {
     }
 
     @objc private func sleepListener(aNotification: NSNotification) {
-        guard SMCHelper.shared.isActive(), !self.mode.isAutomatic else { return }
+        guard FanController.shared.isActive(), !self.mode.isAutomatic else { return }
 
         self.debouncer?.cancel()
         self.wakeTask?.cancel()
@@ -1633,8 +1610,8 @@ internal class FanControlView: NSStackView {
         self.willSleepSpeed = self.storedSpeed ?? Int(self.slider?.doubleValue ?? 0)
         FanCurveController.shared.setEnabled(false)
         FanCurveController.shared.invalidateSamples()
-        self.fans.forEach { SMCHelper.shared.setFanMode($0.id, mode: FanMode.automatic.rawValue) }
-        SMCHelper.shared.resetFanControl()
+        self.fans.forEach { FanController.shared.setFanMode($0.id, mode: FanMode.automatic.rawValue) }
+        FanController.shared.resetFanControl()
         if self.mode != .custom {
             self.modeButtons?.setMode(.automatic)
         }
@@ -1676,87 +1653,64 @@ internal class FanControlView: NSStackView {
         barView.setValue(ColorValue(Double(percentage) / 100))
     }
 
-    @objc private func installHelper(_ sender: NSButton) {
-        SMCHelper.shared.install { [weak self] state in
+    @objc private func checkControllerAvailability(_ sender: NSButton) {
+        FanController.shared.checkAvailability { [weak self] available in
             DispatchQueue.main.async {
-                switch state {
-                case .enabled:
-                    NotificationCenter.default.post(name: .fanHelperState, object: nil, userInfo: ["state": true])
-                case .requiresApproval:
-                    self?.showApprovalPending()
-                case .failed:
-                    self?.showInstallFailed()
-                    NotificationCenter.default.post(name: .fanHelperState, object: nil, userInfo: ["state": false])
+                if available {
+                    NotificationCenter.default.post(name: .fanControllerState, object: nil, userInfo: ["state": true])
+                } else {
+                    self?.showControllerUnavailable()
+                    self?.startControllerPolling()
+                    NotificationCenter.default.post(name: .fanControllerState, object: nil, userInfo: ["state": false])
                 }
             }
         }
     }
 
-    @objc private func openLoginItems(_ sender: NSButton) {
-        SMCHelper.shared.openLoginItems()
-    }
-
-    private func showApprovalPending() {
-        self.helperButton?.title = localizedString("Approve in System Settings ▸ Login Items")
-        self.helperButton?.action = #selector(self.openLoginItems)
-
-        self.startApprovalPolling()
-
+    private func showControllerUnavailable() {
         let alert = NSAlert()
-        alert.messageText = localizedString("Fan helper needs your approval")
-        alert.informativeText = localizedString("To control the fans, enable Stats in System Settings ▸ Login Items.")
-        alert.addButton(withTitle: localizedString("Open Login Items"))
+        alert.messageText = localizedString("FanController is unavailable")
+        alert.informativeText = localizedString("Install and start the standalone FanController, then return to Stats. Stats no longer installs a privileged fan helper.")
+        alert.addButton(withTitle: localizedString("Open setup guide"))
         alert.addButton(withTitle: localizedString("Cancel"))
 
         if alert.runModal() == .alertFirstButtonReturn {
-            SMCHelper.shared.openLoginItems()
+            FanController.shared.openSetupGuide()
         }
     }
 
-    private func showInstallFailed() {
-        let alert = NSAlert()
-        alert.messageText = localizedString("Could not enable the fan helper")
-        alert.informativeText = localizedString("Open System Settings ▸ Login Items, make sure Stats is allowed in the background, then try again.")
-        alert.addButton(withTitle: localizedString("Open Login Items"))
-        alert.addButton(withTitle: localizedString("Cancel"))
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            SMCHelper.shared.openLoginItems()
-        }
-    }
-
-    private func startApprovalPolling() {
-        self.approvalPollTimer?.invalidate()
+    private func startControllerPolling() {
+        self.controllerPollTimer?.invalidate()
         var elapsed: TimeInterval = 0
-        self.approvalPollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
+        self.controllerPollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
             elapsed += 2
-            if SMCHelper.shared.isInstalled {
+            if FanController.shared.isAvailable {
                 timer.invalidate()
-                self?.approvalPollTimer = nil
+                self?.controllerPollTimer = nil
                 DispatchQueue.main.async {
-                    self?.helperButton?.title = localizedString("Install fan helper")
-                    self?.helperButton?.action = #selector(FanControlView.installHelper)
+                    self?.controllerButton?.title = localizedString("Set up FanController")
+                    self?.controllerButton?.action = #selector(FanControlView.checkControllerAvailability)
                     self?.setupControls(true)
                 }
             } else if elapsed >= 60 {
                 timer.invalidate()
-                self?.approvalPollTimer = nil
+                self?.controllerPollTimer = nil
             }
         }
     }
 
-    private func setupControls(_ isInstalled: Bool? = nil) {
-        let helperState = isInstalled ?? SMCHelper.shared.isInstalled
-        self.helperInstalled = helperState
+    private func setupControls(_ isAvailable: Bool? = nil) {
+        let controllerState = isAvailable ?? FanController.shared.isAvailable
+        self.controllerAvailable = controllerState
 
         if !self.controlState {
-            self.helperView?.removeFromSuperview()
+            self.controllerSetupView?.removeFromSuperview()
             self.controlView?.removeFromSuperview()
             self.buttonsView?.removeFromSuperview()
             self.profileRow?.removeFromSuperview()
         } else {
-            if helperState {
-                self.helperView?.removeFromSuperview()
+            if controllerState {
+                self.controllerSetupView?.removeFromSuperview()
                 if self.minSpeed != self.maxSpeed, let v = self.buttonsView {
                     self.addArrangedSubview(v)
                 }
@@ -1771,7 +1725,7 @@ internal class FanControlView: NSStackView {
                 self.buttonsView?.removeFromSuperview()
                 self.controlView?.removeFromSuperview()
                 self.profileRow?.removeFromSuperview()
-                if let v = self.helperView {
+                if let v = self.controllerSetupView {
                     self.addArrangedSubview(v)
                 }
             }
@@ -1786,13 +1740,13 @@ internal class FanControlView: NSStackView {
         self.sizeCallback()
     }
 
-    @objc private func changeHelperState(_ notification: Notification) {
+    @objc private func changeControllerState(_ notification: Notification) {
         guard let state = notification.userInfo?["state"] as? Bool else { return }
         self.setupControls(state)
     }
 
-    @objc private func recheckHelperState() {
-        guard SMCHelper.shared.isInstalled != self.helperInstalled else { return }
+    @objc private func recheckControllerState() {
+        guard FanController.shared.isAvailable != self.controllerAvailable else { return }
         self.setupControls()
     }
 

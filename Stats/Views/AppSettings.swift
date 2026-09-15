@@ -57,7 +57,6 @@ class ApplicationSettings: NSStackView {
     private var remoteUpdatesBtn: NSSwitch?
     
     private var combinedModulesView: PreferencesSection?
-    private var fanHelperView: PreferencesSection?
     private var remoteView: PreferencesSection?
     
     private var updateWindow: UpdateWindow?
@@ -197,13 +196,12 @@ class ApplicationSettings: NSStackView {
             )
         ]))
         
-        self.fanHelperView = PreferencesSection([
+        scrollView.stackView.addArrangedSubview(PreferencesSection(title: localizedString("FanController"), [
             PreferencesRow(
-                localizedString("Uninstall fan helper"),
-                component: buttonView(#selector(self.uninstallHelper), text: localizedString("Uninstall"))
+                localizedString("Standalone fan controller"),
+                component: buttonView(#selector(self.openFanControllerGuide), text: localizedString("Open setup guide"))
             )
-        ])
-        scrollView.stackView.addArrangedSubview(self.fanHelperView!)
+        ]))
         
         self.addArrangedSubview(scrollView)
         
@@ -227,16 +225,11 @@ class ApplicationSettings: NSStackView {
         scrollView.stackView.addArrangedSubview(PreferencesSection(title: localizedString("Stress tests"), tests))
         #endif
         
-        NotificationCenter.default.addObserver(self, selector: #selector(self.toggleUninstallHelperButton), name: .fanHelperState, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.handleRemoteState), name: .remoteState, object: nil)
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-    
-    deinit {
-        NotificationCenter.default.removeObserver(self, name: .fanHelperState, object: nil)
     }
     
     internal func viewWillAppear() {
@@ -436,15 +429,8 @@ class ApplicationSettings: NSStackView {
         }
     }
     
-    @objc private func toggleUninstallHelperButton(_ notification: Notification) {
-        guard let state = notification.userInfo?["state"] as? Bool, let v = self.fanHelperView else {
-            return
-        }
-        v.isHidden = !state
-    }
-    
-    @objc private func uninstallHelper() {
-        SMCHelper.shared.uninstall()
+    @objc private func openFanControllerGuide() {
+        FanController.shared.openSetupGuide()
     }
     
     @objc private func toggleCPUeStressTest() {

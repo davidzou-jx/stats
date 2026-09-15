@@ -75,7 +75,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         self.suppressStatusBarTilingConstraintUpdates()
         self.parseArguments()
         self.parseVersion()
-        SMCHelper.shared.checkForUpdate()
         self.setup {
             modules.reversed().forEach{ $0.mount() }
             self.modulesMounted = true

@@ -1,5 +1,5 @@
 // Standalone regression runner: links Debug Sensors/Kit frameworks and injects
-// hardware commands. It never launches Stats or contacts the privileged helper.
+// hardware commands. It never launches Stats or contacts FanController.
 import Foundation
 import Kit
 @testable import Sensors

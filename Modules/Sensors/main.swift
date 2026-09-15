@@ -88,18 +88,18 @@ public class Sensors: Module {
     }
     
     public override func willTerminate() {
-        guard SMCHelper.shared.isActive() else { return }
+        guard FanController.shared.isActive() else { return }
 
         FanCurveController.shared.setEnabled(false)
         let mode = FanMode(rawValue: Store.shared.int(key: "Sensors_fanMode", defaultValue: -1))
         if let mode, !mode.isAutomatic, let reader = self.sensorsReader {
             reader.list.sensors.filter({ $0 is Fan }).forEach { (s: Sensor_p) in
                 if let f = s as? Fan {
-                    SMCHelper.shared.setFanMode(f.id, mode: FanMode.automatic.rawValue)
+                    FanController.shared.setFanMode(f.id, mode: FanMode.automatic.rawValue)
                 }
             }
         }
-        SMCHelper.shared.resetFanControl()
+        FanController.shared.resetFanControl()
     }
     
     private func usageCallback(_ raw: Sensors_List?) {

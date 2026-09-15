@@ -2,7 +2,7 @@
 set -eu
 
 # Build Debug first. Run existing unit tests and runtime regressions without
-# launching Stats, opening its database, or contacting the SMC helper.
+# launching Stats, opening its database, or contacting FanController.
 build_dir="${1:-/private/tmp/stats-efficiency-build}"
 test_dir="$(mktemp -d /private/tmp/stats-runtime-tests.XXXXXX)"
 trap 'rm -rf "$test_dir"' EXIT

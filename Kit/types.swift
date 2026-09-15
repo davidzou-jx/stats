@@ -353,7 +353,7 @@ public extension Notification.Name {
     static let resetTotalNetworkUsage = Notification.Name("resetTotalNetworkUsage")
     static let syncFansControl = Notification.Name("syncFansControl")
     static let checkFanModes = Notification.Name("checkFanModes")
-    static let fanHelperState = Notification.Name("fanHelperState")
+    static let fanControllerState = Notification.Name("fanControllerState")
     static let fanCurveProfilesChanged = Notification.Name("fanCurveProfilesChanged")
     static let toggleOneView = Notification.Name("toggleOneView")
     static let widgetRearrange = Notification.Name("widgetRearrange")

@@ -315,7 +315,7 @@ internal class SensorsReader: Reader<Sensors_List> {
             FanCurveController.shared.pollingAvailable = false
             FanCurveController.shared.setEnabled(false)
             FanCurveController.shared.invalidateSamples()
-            SMCHelper.shared.resetFanControl()
+            FanController.shared.resetFanControl()
             NotificationCenter.default.post(name: Notification.Name("SensorsFanControlUnavailable"), object: nil)
         }
     }

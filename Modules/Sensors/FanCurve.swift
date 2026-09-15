@@ -36,8 +36,8 @@ public class FanCurveController {
     private let now: () -> TimeInterval
 
     internal init(configURL: URL? = nil,
-                  applyTargets: @escaping ([Int: Int], @escaping (Bool) -> Void) -> Void = { SMCHelper.shared.setFanSpeeds($0, completion: $1) },
-                  restoreAutomatic: @escaping () -> Void = { SMCHelper.shared.resetFanControl() },
+                  applyTargets: @escaping ([Int: Int], @escaping (Bool) -> Void) -> Void = { FanController.shared.setFanSpeeds($0, completion: $1) },
+                  restoreAutomatic: @escaping () -> Void = { FanController.shared.resetFanControl() },
                   now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.configLocation = configURL
         self.applyTargets = applyTargets
