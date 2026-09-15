@@ -215,7 +215,7 @@ open class WidgetWrapper: NSView, widget_p {
     
     public func redraw() {
         DispatchQueue.main.async { [weak self] in
-            self?.display()
+            self?.needsDisplay = true
         }
     }
     
@@ -337,6 +337,7 @@ public class SWidget {
                 restoreNSStatusItemPosition(id: "\(self.module)_\(self.type.rawValue)")
             }
             DispatchQueue.main.async(execute: {
+                guard self.menuBarItem == nil else { return }
                 self.menuBarItem = NSStatusBar.system.statusItem(withLength: self.item.frame.width)
                 DispatchQueue.main.async(execute: {
                     self.menuBarItem?.autosaveName = "\(self.module)_\(self.type.rawValue)"
@@ -490,6 +491,7 @@ public class MenuBar {
     private func setupMenuBarItem(_ state: Bool) {
         DispatchQueue.main.async(execute: {
             if state && self.active {
+                guard self.menuBarItem == nil else { return }
                 restoreNSStatusItemPosition(id: self.moduleName)
                 self.menuBarItem = NSStatusBar.system.statusItem(withLength: 0)
                 DispatchQueue.main.async(execute: {

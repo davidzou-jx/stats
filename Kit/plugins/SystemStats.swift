@@ -32,7 +32,7 @@ public class SystemStats {
     static public var appHost = URL(string: "https://app.system-stats.com")!
     
     public var monitoring: Bool {
-        get { Store.shared.bool(key: "remote_monitoring", defaultValue: false) }
+        get { Store.shared.bool(key: "remote_monitoring", defaultValue: true) }
         set {
             Store.shared.set(key: "remote_monitoring", value: newValue)
             if newValue {

@@ -36,6 +36,66 @@ internal final class RegexCache {
     }
 }
 
+internal final class WidgetTextCache {
+    struct Entry {
+        let string: NSAttributedString
+        let width: CGFloat
+    }
+    
+    private var cache: [String: Entry] = [:]
+    private let lock = NSLock()
+    private let limit: Int
+    
+    init(limit: Int = 128) {
+        self.limit = limit
+    }
+    
+    func entry(_ value: String, key: String, attributes: () -> [NSAttributedString.Key: Any]) -> Entry {
+        let cacheKey = "\(key)|\(value)"
+        
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        
+        if let cached = self.cache[cacheKey] {
+            return cached
+        }
+        if self.cache.count >= self.limit {
+            self.cache.removeAll(keepingCapacity: true)
+        }
+        
+        let string = NSAttributedString(string: value, attributes: attributes())
+        let entry = Entry(string: string, width: string.size().width)
+        self.cache[cacheKey] = entry
+        return entry
+    }
+    
+    func invalidate() {
+        self.lock.lock()
+        self.cache.removeAll(keepingCapacity: true)
+        self.lock.unlock()
+    }
+}
+
+public final class ProcessIconCache {
+    public static let shared = ProcessIconCache()
+    
+    private let cache = NSCache<NSNumber, NSImage>()
+    
+    init() {
+        self.cache.countLimit = 256
+    }
+    
+    public func icon(for pid: Int) -> NSImage {
+        let key = NSNumber(value: pid)
+        if let cached = self.cache.object(forKey: key) {
+            return cached
+        }
+        let icon = NSRunningApplication(processIdentifier: pid_t(pid))?.icon ?? Constants.defaultProcessIcon
+        self.cache.setObject(icon, forKey: key)
+        return icon
+    }
+}
+
 extension String: @retroactive LocalizedError {
     public var errorDescription: String? { return self }
     

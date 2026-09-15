@@ -65,6 +65,7 @@ internal class Popup: PopupWrapper {
         self.orientation = .vertical
         self.distribution = .fill
         self.spacing = 0
+        self.setClippingResistancePriority(.defaultLow, for: .vertical)
     }
     
     required init?(coder: NSCoder) {
@@ -72,7 +73,7 @@ internal class Popup: PopupWrapper {
     }
     
     private func recalculateHeight() {
-        let h = self.loginPrompt.window != nil ? self.loginPrompt.fittingSize.height : self.groups.fittingSize.height
+        let h = self.fittingSize.height
         if h > 0 && self.frame.size.height != h {
             self.setFrameSize(NSSize(width: self.frame.width, height: h))
             self.sizeCallback?(self.frame.size)
@@ -135,7 +136,7 @@ internal class Popup: PopupWrapper {
         
         let mi = Dictionary(snapshot.order.machines.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         let hi = Dictionary(snapshot.order.hosts.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
-        let groupById = Dictionary(uniqueKeysWithValues: snapshot.groups.map { ($0.id, $0) })
+        let groupById = Dictionary(snapshot.groups.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         
         let sortedMachines = enabledMachines.sorted { a, b in
             let ia = mi[a.id] ?? Int.max

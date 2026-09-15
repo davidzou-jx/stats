@@ -64,10 +64,12 @@ class ApplicationSettings: NSStackView {
     
     private var CPUeButton: NSButton?
     private var CPUpButton: NSButton?
+    private var CPUsButton: NSButton?
     private var GPUButton: NSButton?
     
-    private var CPUeTest: CPUeStressTest = CPUeStressTest()
-    private var CPUpTest: CPUpStressTest = CPUpStressTest()
+    private var CPUeTest: CPUStressTest = CPUStressTest(type: .efficiency)
+    private var CPUpTest: CPUStressTest = CPUStressTest(type: .performance)
+    private var CPUsTest: CPUStressTest = CPUStressTest(type: .super)
     private var GPUTest: GPUStressTest? = GPUStressTest()
     
     private var planField: NSTextField?
@@ -207,16 +209,25 @@ class ApplicationSettings: NSStackView {
         
         let CPUeButton = buttonView(#selector(self.toggleCPUeStressTest), text: localizedString("Run"))
         let CPUpButton = buttonView(#selector(self.toggleCPUpStressTest), text: localizedString("Run"))
+        let CPUsButton = buttonView(#selector(self.toggleCPUsStressTest), text: localizedString("Run"))
         let GPUButton = buttonView(#selector(self.toggleGPUStressTest), text: localizedString("Run"))
         
         self.CPUeButton = CPUeButton
         self.CPUpButton = CPUpButton
+        self.CPUsButton = CPUsButton
         self.GPUButton = GPUButton
         
-        var tests = [
-            PreferencesRow(localizedString("Efficiency cores"), component: CPUeButton),
-            PreferencesRow(localizedString("Performance cores"), component: CPUpButton)
-        ]
+        let cpu = SystemKit.shared.device.info.cpu
+        var tests: [PreferencesRow] = []
+        if (cpu?.eCores ?? 1) > 0 {
+            tests.append(PreferencesRow(localizedString("Efficiency cores"), component: CPUeButton))
+        }
+        if (cpu?.pCores ?? 1) > 0 {
+            tests.append(PreferencesRow(localizedString("Performance cores"), component: CPUpButton))
+        }
+        if (cpu?.sCores ?? 0) > 0 {
+            tests.append(PreferencesRow(localizedString("Super cores"), component: CPUsButton))
+        }
         if self.GPUTest != nil {
             tests.append(PreferencesRow(localizedString("GPU"), component: GPUButton))
         }
@@ -450,6 +461,16 @@ class ApplicationSettings: NSStackView {
         } else {
             self.CPUpTest.start()
             self.CPUpButton?.title = localizedString("Stop")
+        }
+    }
+    
+    @objc private func toggleCPUsStressTest() {
+        if self.CPUsTest.isRunning {
+            self.CPUsTest.stop()
+            self.CPUsButton?.title = localizedString("Run")
+        } else {
+            self.CPUsTest.start()
+            self.CPUsButton?.title = localizedString("Stop")
         }
     }
     

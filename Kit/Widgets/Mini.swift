@@ -159,7 +159,7 @@ public class Mini: WidgetWrapper {
         }
         guard updated else { return }
         DispatchQueue.main.async(execute: {
-            self.display()
+            self.needsDisplay = true
         })
     }
     
@@ -199,7 +199,7 @@ public class Mini: WidgetWrapper {
         }
         guard updated else { return }
         DispatchQueue.main.async(execute: {
-            self.display()
+            self.needsDisplay = true
         })
     }
     
@@ -211,7 +211,7 @@ public class Mini: WidgetWrapper {
         }
         guard updated else { return }
         DispatchQueue.main.async(execute: {
-            self.display()
+            self.needsDisplay = true
         })
     }
     

@@ -102,6 +102,9 @@ internal class UsageReader: Reader<Battery_Usage> {
                     self.usage.state = list[kIOPSBatteryHealthKey] as? String
                 }
                 self.usage.health = Int((Double(100 * self.usage.maxCapacity) / Double(self.usage.designedCapacity)).rounded(.toNearestOrEven))
+                if self.usage.health > 100 {
+                    self.usage.health = 100
+                }
                 
                 self.usage.current = self.getIntValue("Amperage" as CFString) ?? 0
                 self.usage.voltage = self.getVoltage() ?? 0
