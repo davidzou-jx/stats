@@ -180,7 +180,7 @@ public class StackWidget: WidgetWrapper {
         
         var width: CGFloat = self.oneRowWidth
         if !fixedSizeState {
-            width = element.value.widthOfString(usingFont: font).rounded(.up) + 1
+            width = entry.width.rounded(.up) + 1
         }
         
         let rect = CGRect(x: x, y: (Constants.Widget.height-13)/2, width: width, height: 13)
@@ -219,8 +219,8 @@ public class StackWidget: WidgetWrapper {
         
         var width: CGFloat = self.twoRowWidth
         if !fixedSizeState {
-            let firstRowWidth = topElement.value.widthOfString(usingFont: font)
-            let secondRowWidth = bottomElement?.value.widthOfString(usingFont: font) ?? 0
+            let firstRowWidth = top.width
+            let secondRowWidth = bottom?.width ?? 0
             width = max(18, max(firstRowWidth, secondRowWidth)).rounded(.up) + 1
         }
         

@@ -175,53 +175,12 @@ internal class DevicesReader: Reader<[BLEDevice]>, CBCentralManagerDelegate, CBP
                 if let manager = self.manager, manager.state == .poweredOn {
                     manager.connect(p, options: nil)
                 }
-                
-                let rssi = device.rssi == 127 ? nil : Int(device.rssi)
-                if let idx = self.devices.firstIndex(where: { $0.address == data.address }) {
-                    self.devices[idx].RSSI = rssi
-                    self.devices[idx].batteryLevel = data.batteryLevel
-                    self.devices[idx].isPaired = device.isPaired
-                    self.devices[idx].isConnected = device.isConnected
-                    if self.devices[idx].vendorId == nil { self.devices[idx].vendorId = data.vendorId }
-                    if self.devices[idx].productId == nil { self.devices[idx].productId = data.productId }
-                    
-                    return
-                }
-                
-                self.devices.append(BLEDevice(
-                    address: data.address,
-                    name: data.name ?? device.name,
-                    uuid: data.uuid,
-                    RSSI: rssi,
-                    batteryLevel: data.batteryLevel,
-                    isConnected: device.isConnected,
-                    isPaired: device.isPaired,
-                    vendorId: data.vendorId,
-                    productId: data.productId
-                ))
-            }
-            
-            let peripherals = self.manager?.retrievePeripherals(withIdentifiers: self.devices.compactMap({ $0.uuid })) ?? []
-            peripherals.forEach { (p: CBPeripheral) in
-                guard let idx = self.devices.firstIndex(where: { $0.uuid == p.identifier }) else {
-                    return
-                }
-                
-                if self.devices[idx].peripheral == nil {
-                    self.devices[idx].peripheral = p
-                }
-                
-                if p.state == .disconnected {
-                    if let manager = self.manager, manager.state == .poweredOn {
-                        manager.connect(p, options: nil)
-                    }
-                } else if p.state == .disconnecting {
-                    self.devicesToRemove.append(p.identifier)
-                } else if p.state == .connected && !self.devices[idx].isPeripheralInitialized {
-                    p.delegate = self
-                    p.discoverServices([DevicesReader.batteryServiceUUID])
-                    self.devices[idx].isPeripheralInitialized = true
-                }
+            } else if p.state == .disconnecting {
+                self.devicesToRemove.append(p.identifier)
+            } else if p.state == .connected && !self.devices[idx].isPeripheralInitialized {
+                p.delegate = self
+                p.discoverServices([DevicesReader.batteryServiceUUID])
+                self.devices[idx].isPeripheralInitialized = true
             }
             
             for (i, d) in self.devices.enumerated() {
