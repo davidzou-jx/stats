@@ -142,6 +142,9 @@ private class CombinedGroup: NSObject {
     }
     
     func setModules(_ modules: [Module]) {
+        self.modules.forEach { module in
+            module.menuBar.widgets.forEach { $0.item.onClick = nil }
+        }
         self.modules = modules.sorted(by: { $0.combinedPosition < $1.combinedPosition })
         self.popupView.setModules(self.modules)
         self.recalculate()
@@ -204,41 +207,63 @@ private class CombinedGroup: NSObject {
     func updateClickHandling() {
         guard let item = self.menuBarItem else { return }
         
-        if !self.combinedModulesPopup {
-            self.modules.forEach { (m: Module) in
-                m.menuBar.widgets.forEach { w in
-                    w.item.onClick = {
-                        if let window = w.item.window {
-                            NotificationCenter.default.post(name: .togglePopup, object: nil, userInfo: [
-                                "module": m.name,
-                                "widget": w.type,
-                                "origin": window.frame.origin,
-                                "center": window.frame.width/2
-                            ])
-                        }
-                    }
-                }
+        self.modules.forEach { (m: Module) in
+            m.menuBar.widgets.forEach { w in
+                w.item.onClick = nil
             }
-            item.button?.action = nil
+        }
+
+        item.button?.target = self
+        item.button?.action = #selector(self.handleClick)
+        item.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
+    }
+
+    @objc private func handleClick() {
+        if self.combinedModulesPopup {
+            self.togglePopup()
         } else {
-            self.modules.forEach { (m: Module) in
-                m.menuBar.widgets.forEach { w in
-                    w.item.onClick = nil
-                }
-            }
-            
-            item.button?.target = self
-            item.button?.action = #selector(self.togglePopup)
-            item.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
+            self.openModulePopup()
         }
     }
     
-    @objc private func togglePopup() {
+    private func openModulePopup() {
+        guard let window = self.menuBarItem?.button?.window else { return }
+        let location = self.view.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        guard self.view.bounds.minX <= location.x && location.x <= self.view.bounds.maxX else { return }
+        let modules = self.modules.compactMap { module -> (Module, NSRect)? in
+            guard !module.menuBar.activeWidgets.isEmpty else { return nil }
+            return (module, module.menuBar.view.frame)
+        }
+        guard let (module, _) = self.item(at: location.x, in: modules) else { return }
+
+        var userInfo: [String: Any] = [
+            "module": module.name,
+            "origin": window.frame.origin,
+            "center": window.frame.width/2
+        ]
+        let widgetLocation = module.menuBar.view.convert(location, from: self.view)
+        let widgets = module.menuBar.activeWidgets.map { ($0, $0.item.frame) }
+        if let (widget, _) = self.item(at: widgetLocation.x, in: widgets) {
+            userInfo["widget"] = widget.type
+        }
+        NotificationCenter.default.post(name: .togglePopup, object: nil, userInfo: userInfo)
+    }
+
+    private func item<T>(at x: CGFloat, in items: [(T, NSRect)]) -> (T, NSRect)? {
+        if let item = items.first(where: { $0.1.minX <= x && x < $0.1.maxX }) {
+            return item
+        }
+        return items.filter({ $0.1.minX <= x }).max(by: { $0.1.minX < $1.1.minX }) ??
+            items.min(by: { $0.1.minX < $1.1.minX })
+    }
+
+    private func togglePopup() {
         guard let item = self.menuBarItem, let popup = self.popup, let window = item.button?.window else { return }
-        let openedWindows = NSApplication.shared.windows.filter{ $0 is NSPanel }
-        openedWindows.forEach{ $0.setIsVisible(false) }
+        let wasVisible = popup.isVisible
+        let openedWindows = NSApplication.shared.windows.compactMap({ $0 as? PopupWindow }).filter({ $0 !== popup })
+        openedWindows.forEach({ $0.orderOut(nil) })
         
-        if popup.occlusionState.rawValue == 8192 {
+        if !wasVisible {
             NSApplication.shared.activate(ignoringOtherApps: true)
             
             popup.contentView?.invalidateIntrinsicContentSize()
@@ -258,9 +283,9 @@ private class CombinedGroup: NSObject {
             }
             
             popup.setFrameOrigin(NSPoint(x: x, y: y))
-            popup.setIsVisible(true)
+            popup.makeKeyAndOrderFront(nil)
         } else {
-            popup.setIsVisible(false)
+            popup.orderOut(nil)
         }
     }
 }

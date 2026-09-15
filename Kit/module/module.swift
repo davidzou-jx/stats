@@ -297,8 +297,9 @@ open class Module {
             return
         }
         
-        let openedWindows = NSApplication.shared.windows.filter{ $0 is NSPanel }
-        openedWindows.forEach{ $0.setIsVisible(false) }
+        let wasVisible = popup.isVisible
+        let openedWindows = NSApplication.shared.windows.compactMap({ $0 as? PopupWindow }).filter({ $0 !== popup })
+        openedWindows.forEach({ $0.orderOut(nil) })
         
         var reopen: Bool = false
         if let widget = notification.userInfo?["widget"] as? widget_t {
@@ -306,7 +307,7 @@ open class Module {
             popup.openedBy = widget
         }
         
-        if popup.occlusionState.rawValue == 8192 || reopen {
+        if !wasVisible || reopen {
             NSApplication.shared.activate(ignoringOtherApps: true)
             
             popup.contentView?.invalidateIntrinsicContentSize()
@@ -326,11 +327,11 @@ open class Module {
             }
             
             popup.setFrameOrigin(NSPoint(x: x, y: y))
-            popup.setIsVisible(true)
+            popup.makeKeyAndOrderFront(nil)
         } else {
             popup.locked = false
             popup.openedBy = nil
-            popup.setIsVisible(false)
+            popup.orderOut(nil)
         }
     }
     
