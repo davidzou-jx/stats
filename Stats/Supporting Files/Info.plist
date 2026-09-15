@@ -41,11 +41,6 @@
 	<string>NSApplication</string>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>
-	<key>SMPrivilegedExecutables</key>
-	<dict>
-		<key>eu.exelban.Stats.SMC.Helper</key>
-		<string>identifier "eu.exelban.Stats.SMC.Helper"</string>
-	</dict>
 	<key>TeamId</key>
 	<string>S33K4FRB65</string>
 </dict>

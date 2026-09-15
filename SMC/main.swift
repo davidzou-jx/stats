@@ -11,7 +11,7 @@
 
 import Foundation
 
-// The helper relies on a nonzero exit status when a command did not take effect.
+// Callers rely on a nonzero exit status when a command did not take effect.
 // Stay alive during read-back; a queued closure would die with this CLI process.
 private func verify(_ condition: () -> Bool) {
     let deadline = ProcessInfo.processInfo.systemUptime + 2
