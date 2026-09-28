@@ -176,7 +176,7 @@ internal class Preview: PreviewWrapper {
         self.statusField = previewBadgeRow(view, title: "\(localizedString("Status")):")
         self.connectivityField = previewBadgeRow(view, title: "\(localizedString("Internet connection")):")
         self.latencyField = previewRow(view, title: "\(localizedString("Latency")):", value: "0 ms")
-        self.jitterField = previewRow(view, title: "\(localizedString("Jitter")):", value: "0 ms")
+        self.jitterField = previewRow(view, title: "\("Jitter"):", value: "0 ms")
         
         return view
     }
@@ -194,7 +194,7 @@ internal class Preview: PreviewWrapper {
         self.macAddressField?.isSelectable = true
         self.ssidField = previewRow(view, title: "\(localizedString("Network")):", value: "")
         self.ssidField?.superview?.isHidden = true
-        self.bssidField = previewRow(view, title: "\(localizedString("BSSID")):", value: "")
+        self.bssidField = previewRow(view, title: "\("BSSID"):", value: "")
         self.bssidField?.isSelectable = true
         self.bssidField?.superview?.isHidden = true
         self.standardField = previewRow(view, title: "\(localizedString("Standard")):", value: "")

@@ -18,6 +18,14 @@ To install it using Homebrew, open the Terminal app and type:
 brew install stats
 ```
 
+### Headless (SSH)
+To install Stats remotely over SSH and set it up as a remote monitoring agent, run:
+```bash
+curl -fsSL https://cdn.mac-stats.com/install.sh | bash
+```
+The script installs the app, enables the Remote module and prints a URL with an authorization code - open it on any device and sign in to your System Stats account to authorize the machine. After that Stats starts streaming metrics to your account and is registered to launch automatically at login and restart if it stops.
+The Mac needs an active user session (a locked screen is fine) to run the app; on a fully headless machine Stats will start at the next login.
+
 ### Uninstall
 Run the uninstall script bundled with the app (administrator privileges may be required to remove the app or a legacy Stats helper):
 ```bash
@@ -33,7 +41,7 @@ The standalone FanController is managed separately and is not removed with Stats
 
 If the app has already been moved to the Trash, the script can be run directly from the repository:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/exelban/stats/master/Kit/scripts/uninstall.sh | sh
+curl -fsSL https://raw.githubusercontent.com/davidzou-jx/stats/master/Kit/scripts/uninstall.sh | sh
 ```
 
 ### Legacy version
@@ -87,6 +95,11 @@ macOS 26 introduced a new privacy control under System Settings → Menu Bar. Ap
 Due to a problem with high data load in the system process (`chronod`) responsible for communication between the app and widgets, communication is disabled by default on the Stats side. To enable it, the `macOS widgets` option must be enabled in the Stats settings. More details you can find [here](https://github.com/exelban/stats/issues/2733).
 
 **Solution:** open **Stats Settings** and toggle **macOS widgets** ON.
+
+### Wi-Fi network name shows Unknown
+macOS requires Location Services permission to read the Wi-Fi network name. If access for Stats is disabled, the network name may show as `Unknown` without a permission popup.
+
+**Solution:** open **System Settings → Privacy & Security → Location Services**, make sure Location Services is enabled, and toggle **Stats** ON. Then quit and reopen Stats.
 
 ### How to reduce energy impact or CPU usage of Stats?
 Stats tries to be efficient as it's possible. But reading some data periodically is not a cheap task. Each module has its own "price". So, if you want to reduce energy impact from the Stats you need to disable some Stats modules. The most inefficient modules are Sensors and Bluetooth. Disabling these modules could reduce CPU usage and power efficiency by up to 50% in some cases.

@@ -39,19 +39,22 @@ public enum Platform: String, Codable {
     case m5Max
     case m5Ultra
     
+    case a18Pro
+    
     public static var apple: [Platform] {
         return [
             .m1, .m1Pro, .m1Max, .m1Ultra,
             .m2, .m2Pro, .m2Max, .m2Ultra,
             .m3, .m3Pro, .m3Max, .m3Ultra,
             .m4, .m4Pro, .m4Max, .m4Ultra,
-            .m5, .m5Pro, .m5Max, .m5Ultra
+            .m5, .m5Pro, .m5Max, .m5Ultra,
+            .a18Pro
         ]
     }
     
     public var generation: Int {
         switch self {
-        case .intel: return 0
+        case .intel, .a18Pro: return 0
         case .m1, .m1Pro, .m1Max, .m1Ultra: return 1
         case .m2, .m2Pro, .m2Max, .m2Ultra: return 2
         case .m3, .m3Pro, .m3Max, .m3Ultra: return 3
@@ -330,7 +333,7 @@ public class SystemKit {
         }
         
         let result = hostInfo.withMemoryRebound(to: integer_t.self, capacity: Int(size)) {
-            host_info(mach_host_self(), HOST_BASIC_INFO, $0, &size)
+            host_info(machHostPort, HOST_BASIC_INFO, $0, &size)
         }
         
         if result != KERN_SUCCESS {
@@ -374,9 +377,11 @@ public class SystemKit {
         
         while service != 0 {
             service = IOIteratorNext(iterator)
+            guard service != 0 else { break }
             
             var entry: io_iterator_t = io_iterator_t()
             if IORegistryEntryGetChildIterator(service, kIOServicePlane, &entry) != kIOReturnSuccess {
+                IOObjectRelease(service)
                 continue
             }
             var child: io_registry_entry_t = 1
@@ -806,6 +811,8 @@ public class SystemKit {
                 } else {
                     return .m5
                 }
+            } else if name.contains("a18 pro") {
+                return .a18Pro
             }
         }
         return nil
