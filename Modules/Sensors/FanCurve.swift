@@ -2,13 +2,13 @@
 //  FanCurve.swift
 //  Sensors
 //
-//  Drives both fans from a JSON config file with multiple profiles, plus global
-//  per-app speed overrides ("appSpeeds") that apply regardless of the active
-//  profile. The config lives at ~/Library/Application Support/Stats/fan-curve.json
-//  and is re-read on every module tick, so edits hot-reload within a tick.
+//  Drives both fans from a JSON config file with multiple profiles. Each profile
+//  has separate temperatureRules, usageRules, and appRules lists. The config lives at
+//  ~/Library/Application Support/Stats/fan-curve.json and is re-read on every
+//  module tick, so edits hot-reload within a tick.
 //
 //  The final target is always the highest of: the interpolated curve speeds and
-//  any appSpeeds entries whose app is currently running.
+//  any appRules entries in the active profile whose app is currently running.
 //
 
 import Cocoa
@@ -33,15 +33,21 @@ public class FanCurveController {
     private let configLocation: URL?
     private let applyTargets: ([Int: Int], @escaping (Bool) -> Void) -> Void
     private let restoreAutomatic: () -> Void
+    private let runningApps: () -> Set<String>
+    private let usageValues: () -> [FanCurveUsageSource: Double]
     private let now: () -> TimeInterval
 
     internal init(configURL: URL? = nil,
                   applyTargets: @escaping ([Int: Int], @escaping (Bool) -> Void) -> Void = { FanController.shared.setFanSpeeds($0, completion: $1) },
                   restoreAutomatic: @escaping () -> Void = { FanController.shared.resetFanControl() },
+                  runningApps: @escaping () -> Set<String> = { FanCurveController.runningApps() },
+                  usageValues: @escaping () -> [FanCurveUsageSource: Double] = { FanCurveUsageReadings.shared.values() },
                   now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.configLocation = configURL
         self.applyTargets = applyTargets
         self.restoreAutomatic = restoreAutomatic
+        self.runningApps = runningApps
+        self.usageValues = usageValues
         self.now = now
     }
 
@@ -131,7 +137,8 @@ public class FanCurveController {
             config = nil
         }
 
-        guard let config, let profile = config.active, !profile.rules.isEmpty else {
+        guard let config, let profile = config.active,
+              !profile.temperatureRules.isEmpty || !profile.usageRules.isEmpty else {
             // Missing or invalid config: stop custom control and restore automatic.
             self.failSafe()
             self.publish(profileNames: [], active: nil)
@@ -149,15 +156,30 @@ public class FanCurveController {
 
         // Every configured temperature rule must be healthy; an app override
         // must not hide a failed thermal sensor.
-        guard profile.rules.allSatisfy({ FanCurveMath.temperature(for: $0, keys: keys, names: names) != nil }) else {
+        guard profile.temperatureRules.allSatisfy({ FanCurveMath.temperature(for: $0, keys: keys, names: names) != nil }) else {
             self.failSafe()
             return
         }
 
-        let target = FanCurveMath.targetSpeed(rules: profile.rules, keys: keys, names: names)
-        let appTarget = FanCurveMath.appTargetSpeed(appSpeeds: config.appSpeeds ?? [], runningApps: Self.runningApps())
-        let combined = max(target ?? 0, appTarget ?? 0)
-        let effective = (target == nil && appTarget == nil) ? nil : combined
+        // A missing or stale usage source must not be masked by another rule.
+        let usages = self.usageValues()
+        guard profile.usageRules.allSatisfy({ rule in
+            guard let value = usages[rule.source] else { return false }
+            return value.isFinite && (0...100).contains(value)
+        }) else {
+            self.failSafe()
+            return
+        }
+
+        let effective = FanCurveMath.combinedTargetSpeed(
+            temperatureRules: profile.temperatureRules,
+            appRules: profile.appRules,
+            keys: keys,
+            names: names,
+            runningApps: self.runningApps(),
+            usageRules: profile.usageRules,
+            usages: usages
+        )
         let fans = sensors.filter({ $0.type == .fan && !$0.isComputed }).compactMap({ $0 as? Fan })
 
         if let effective, !fans.isEmpty {
@@ -208,6 +230,12 @@ public class FanCurveController {
         self.write(config)
         self.publish(profileNames: config.profiles.map({ $0.name }), active: name)
         self.reapply()
+    }
+
+    /// All configured rules are sampled so profile switches can reuse an
+    /// already-warmed historical value and other sensor consumers can see it.
+    internal func configuredTemperatureRules() -> [FanCurveRule] {
+        self.currentConfig()?.profiles.flatMap({ $0.temperatureRules }) ?? []
     }
 
     public func openConfig() {
@@ -267,13 +295,13 @@ public class FanCurveController {
     private static let defaultConfig = FanCurveConfig(
         activeProfile: "Balanced",
         profiles: [
-            FanCurveProfile(name: "Quiet", rules: [
+            FanCurveProfile(name: "Quiet", temperatureRules: [
                 FanCurveRule(sensorName: "Average CPU", points: [
                     FanCurvePoint(temp: 60, speed: 2317),
                     FanCurvePoint(temp: 85, speed: 3500)
                 ])
             ]),
-            FanCurveProfile(name: "Balanced", rules: [
+            FanCurveProfile(name: "Balanced", temperatureRules: [
                 FanCurveRule(sensorName: "Average CPU", points: [
                     FanCurvePoint(temp: 55, speed: 2400),
                     FanCurvePoint(temp: 75, speed: 4500),
@@ -284,12 +312,66 @@ public class FanCurveController {
                     FanCurvePoint(temp: 90, speed: 7000)
                 ])
             ]),
-            FanCurveProfile(name: "Performance", rules: [
+            FanCurveProfile(name: "Performance", temperatureRules: [
                 FanCurveRule(sensorName: "Hottest CPU", points: [
                     FanCurvePoint(temp: 45, speed: 3500),
                     FanCurvePoint(temp: 70, speed: 7000)
                 ])
             ])
         ]
+    )
+}
+
+public final class FanSliderController {
+    public static let shared = FanSliderController()
+
+    private let configLocation: URL?
+
+    internal init(configURL: URL? = nil) {
+        self.configLocation = configURL
+    }
+
+    public var configURL: URL {
+        if let configLocation { return configLocation }
+        return FanCurveController.shared.configURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("fan-slider.json")
+    }
+
+    public func snappedSpeed(_ speed: Int, minimum: Int, maximum: Int) -> Int {
+        guard let config = self.currentConfig() else {
+            let lower = min(minimum, maximum)
+            let upper = max(minimum, maximum)
+            return min(upper, max(lower, speed))
+        }
+        return config.snappedSpeed(speed, minimum: minimum, maximum: maximum)
+    }
+
+    public func openConfig() {
+        _ = self.currentConfig()
+        NSWorkspace.shared.open(self.configURL)
+    }
+
+    private func currentConfig() -> FanSliderConfig? {
+        let fm = FileManager.default
+        let directory = self.configURL.deletingLastPathComponent()
+        if !fm.fileExists(atPath: directory.path) {
+            try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        if !fm.fileExists(atPath: self.configURL.path) {
+            self.write(Self.defaultConfig)
+        }
+        guard let data = try? Data(contentsOf: self.configURL) else { return nil }
+        return FanSliderConfig.parse(data)
+    }
+
+    private func write(_ config: FanSliderConfig) {
+        guard let data = config.encoded() else { return }
+        try? data.write(to: self.configURL, options: .atomic)
+    }
+
+    private static let defaultConfig = FanSliderConfig(
+        enabled: false,
+        notches: [2500, 3500, 4500, 5500, 6500, 7500]
     )
 }

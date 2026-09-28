@@ -18,6 +18,7 @@ public class Sensors: Module {
     private let settingsView: Settings
     private let portalView: Portal
     private let notificationsView: Notifications
+    private var sensorKeys: Set<String> = []
     
     private var fanValueState: FanValue {
         FanValue(rawValue: Store.shared.string(key: "\(self.config.name)_fanValue", defaultValue: "percentage")) ?? .percentage
@@ -45,10 +46,13 @@ public class Sensors: Module {
             self?.usageCallback(value)
         }
         
-        self.settingsView.setList(self.sensorsReader?.list.sensors)
-        self.popupView.setup(self.sensorsReader?.list.sensors)
-        self.portalView.setup(self.sensorsReader?.list.sensors)
-        self.notificationsView.setup(self.sensorsReader?.list.sensors)
+        if let sensors = self.sensorsReader?.list.sensors {
+            self.sensorKeys = Set(sensors.map({ $0.key }))
+            self.settingsView.setList(sensors)
+            self.popupView.setup(sensors)
+            self.portalView.setup(sensors)
+            self.notificationsView.setup(sensors)
+        }
         
         self.settingsView.callback = { [weak self] in
             self?.sensorsReader?.read()
@@ -104,6 +108,19 @@ public class Sensors: Module {
     
     private func usageCallback(_ raw: Sensors_List?) {
         guard let value = raw, self.enabled else { return }
+
+        let keys = Set(value.sensors.map({ $0.key }))
+        if keys != self.sensorKeys {
+            self.sensorKeys = keys
+            let sensors = value.sensors
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.settingsView.setList(sensors)
+                self.popupView.setup(sensors)
+                self.portalView.setup(sensors)
+                self.notificationsView.setup(sensors)
+            }
+        }
         
         self.popupView.usageCallback(value.sensors)
         self.portalView.usageCallback(value.sensors)

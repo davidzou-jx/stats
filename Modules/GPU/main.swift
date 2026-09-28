@@ -178,6 +178,10 @@ public class GPU: Module {
         guard let utilization = selectedGPU.utilization else {
             return
         }
+        if self.infoReader != nil {
+            let freshness = max(5, (self.infoReader?.interval ?? 1) * 2 + 2)
+            FanCurveUsageReadings.shared.update(.gpu, fraction: utilization, freshness: freshness)
+        }
         
         self.popupView.loadCallback(selectedGPU)
         self.portalView.callback(selectedGPU)

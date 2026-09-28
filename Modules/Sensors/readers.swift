@@ -12,6 +12,135 @@
 import Cocoa
 import Kit
 
+internal struct HistoricalTemperatureRequest: Hashable {
+    static let keyPrefix = "historical-average:"
+
+    let sensor: String?
+    let sensorName: String?
+    let seconds: Int
+
+    init?(_ rule: FanCurveRule) {
+        guard let seconds = rule.averageSeconds,
+              (1...FanCurveRule.maximumAverageSeconds).contains(seconds),
+              rule.historicalSensorKey != nil else { return nil }
+        self.sensor = rule.sensor?.lowercased()
+        self.sensorName = rule.sensor == nil ? rule.sensorName?.lowercased() : nil
+        self.seconds = seconds
+    }
+
+    var key: String {
+        let rule = FanCurveRule(sensor: self.sensor, sensorName: self.sensorName, averageSeconds: self.seconds, points: [])
+        return rule.historicalSensorKey!
+    }
+
+    static func isGenerated(_ sensor: Sensor_p) -> Bool {
+        sensor.key.hasPrefix(Self.keyPrefix)
+    }
+
+    func source(in sensors: [Sensor_p]) -> Sensor_p? {
+        if let key = self.sensor, let source = sensors.last(where: { $0.key.lowercased() == key }) {
+            return source
+        }
+        if let name = self.sensorName, let source = sensors.last(where: { $0.name.lowercased() == name }) {
+            return source
+        }
+        return nil
+    }
+}
+
+internal final class HistoricalTemperatureAverages {
+    private struct Sample {
+        let timestamp: TimeInterval
+        let value: Double
+    }
+
+    private struct State {
+        var samples: [Sample] = []
+        var total: Double = 0
+        var lastValue: Double?
+        var sourceName: String?
+        var sourceGroup: SensorGroup?
+    }
+
+    private var states: [HistoricalTemperatureRequest: State] = [:]
+
+    func reset() {
+        self.states = [:]
+    }
+
+    func update(sensors: [Sensor_p], rules: [FanCurveRule], invalidTemperatures: Set<String>, sampledAt: TimeInterval) -> (sensors: [Sensor], invalid: Set<String>) {
+        let requests = Set(rules.compactMap(HistoricalTemperatureRequest.init))
+        self.states = self.states.filter({ requests.contains($0.key) })
+
+        var values: [Sensor] = []
+        var invalid: Set<String> = []
+
+        for request in requests.sorted(by: { $0.key < $1.key }) {
+            var state = self.states[request] ?? State()
+            guard let source = request.source(in: sensors), source.type == .temperature else {
+                state.samples = []
+                state.total = 0
+                if let sensor = self.sensor(for: request, state: state) {
+                    values.append(sensor)
+                }
+                invalid.insert(request.key)
+                self.states[request] = state
+                continue
+            }
+
+            state.sourceName = source.name
+            state.sourceGroup = source.group
+            let valid = !invalidTemperatures.contains(source.key) && source.value.isFinite && (10...120).contains(source.value)
+            guard valid else {
+                state.samples = []
+                state.total = 0
+                if let sensor = self.sensor(for: request, state: state) {
+                    values.append(sensor)
+                }
+                invalid.insert(request.key)
+                self.states[request] = state
+                continue
+            }
+
+            if let last = state.samples.last, sampledAt < last.timestamp {
+                state.samples = []
+                state.total = 0
+            }
+            state.samples.append(Sample(timestamp: sampledAt, value: source.value))
+            state.total += source.value
+
+            let cutoff = sampledAt - TimeInterval(request.seconds)
+            while let first = state.samples.first, first.timestamp < cutoff {
+                state.total -= first.value
+                state.samples.removeFirst()
+            }
+
+            if !state.samples.isEmpty {
+                state.lastValue = state.total / Double(state.samples.count)
+            }
+            if let sensor = self.sensor(for: request, state: state) {
+                values.append(sensor)
+            }
+            self.states[request] = state
+        }
+
+        return (values, invalid)
+    }
+
+    private func sensor(for request: HistoricalTemperatureRequest, state: State) -> Sensor? {
+        guard let value = state.lastValue, let name = state.sourceName, let group = state.sourceGroup else { return nil }
+        return Sensor(
+            key: request.key,
+            name: "\(name) (\(request.seconds)s average)",
+            value: value,
+            group: group,
+            type: .temperature,
+            platforms: Platform.all,
+            isComputed: true
+        )
+    }
+}
+
 internal class SensorsReader: Reader<Sensors_List> {
     static let HIDtypes: [SensorType] = [.temperature, .voltage]
     
@@ -21,6 +150,7 @@ internal class SensorsReader: Reader<Sensors_List> {
     private let readLock = NSLock()
     private let firstRead: Date = Date()
     private var lastIOSensorsRead: Date? = nil
+    private let historicalTemperatures = HistoricalTemperatureAverages()
     
     private var HIDState: Bool {
         Store.shared.bool(key: "Sensors_hid", defaultValue: false)
@@ -133,7 +263,7 @@ internal class SensorsReader: Reader<Sensors_List> {
         guard self.readLock.try() else { return }
         defer { self.readLock.unlock() }
         let sampledAt = ProcessInfo.processInfo.systemUptime
-        var sensors = self.list.sensors
+        var sensors = self.list.sensors.filter({ !HistoricalTemperatureRequest.isGenerated($0) })
         var invalidTemperatures = Set(sensors.filter { $0.type == .temperature }.map { $0.key })
         
         for i in sensors.indices {
@@ -265,17 +395,6 @@ internal class SensorsReader: Reader<Sensors_List> {
             sensors[idx].value = 0
         }
         
-        let updated = Dictionary(sensors.map{ ($0.key, $0) }, uniquingKeysWith: { (first, _) in first })
-        self.list.update { current in
-            var list = current
-            for i in list.indices {
-                if let sensor = updated[list[i].key] {
-                    list[i] = sensor
-                }
-            }
-            return list
-        }
-        
         // Keep display fallbacks, but never use them as fresh control inputs.
         let derivedGroups: [(String, [Sensor_p])] = [
             ("CPU", sensors.filter { ($0.group == .CPU && $0.average && !$0.isComputed && $0.type == .temperature) || $0.key.hasPrefix("pACC MTR Temp") || $0.key.hasPrefix("eACC MTR Temp") }),
@@ -286,6 +405,31 @@ internal class SensorsReader: Reader<Sensors_List> {
             invalidTemperatures.remove("Average \(group)")
             invalidTemperatures.remove("Hottest \(group)")
         }
+
+        let historical = self.historicalTemperatures.update(
+            sensors: sensors,
+            rules: FanCurveController.shared.configuredTemperatureRules(),
+            invalidTemperatures: invalidTemperatures,
+            sampledAt: sampledAt
+        )
+        sensors.append(contentsOf: historical.sensors)
+        invalidTemperatures.formUnion(historical.invalid)
+
+        let updated = Dictionary(sensors.map{ ($0.key, $0) }, uniquingKeysWith: { (first, _) in first })
+        self.list.update { current in
+            var list = current.filter({ !HistoricalTemperatureRequest.isGenerated($0) || updated[$0.key] != nil })
+            for i in list.indices {
+                if let sensor = updated[list[i].key] {
+                    list[i] = sensor
+                }
+            }
+            let additions = sensors.filter({ sensor in
+                !list.contains(where: { $0.key == sensor.key })
+            })
+            list.append(contentsOf: additions)
+            return list
+        }
+
         let snapshot = sensors
         let invalid = invalidTemperatures
         let freshness = max(5, (self.interval ?? 1) * 2 + 2)
@@ -297,6 +441,7 @@ internal class SensorsReader: Reader<Sensors_List> {
 
     public override func pause() {
         super.pause()
+        self.historicalTemperatures.reset()
         self.releaseFanControl()
     }
 
@@ -307,6 +452,7 @@ internal class SensorsReader: Reader<Sensors_List> {
 
     public override func stop() {
         super.stop()
+        self.historicalTemperatures.reset()
         self.releaseFanControl()
     }
 

@@ -148,6 +148,10 @@ public class RAM: Module {
     
     private func loadCallback(_ raw: RAM_Usage?) {
         guard let value = raw, self.enabled else { return }
+        if self.usageReader != nil {
+            let freshness = max(5, (self.usageReader?.interval ?? 1) * 2 + 2)
+            FanCurveUsageReadings.shared.update(.ram, fraction: value.usage, freshness: freshness)
+        }
         
         self.popupView.loadCallback(value)
         self.portalView.callback(value)

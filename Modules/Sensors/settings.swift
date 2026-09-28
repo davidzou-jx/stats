@@ -71,6 +71,17 @@ internal class Settings: NSStackView, Settings_v {
                 state: self.fansSyncState
             ))
         ]))
+
+        self.addArrangedSubview(PreferencesSection(title: localizedString("FanController"), [
+            PreferencesRow(
+                localizedString("Fan curve"),
+                component: buttonView(#selector(self.openFanCurveConfig), text: localizedString("Configs"))
+            ),
+            PreferencesRow(
+                localizedString("Manual slider"),
+                component: buttonView(#selector(self.openFanSliderConfig), text: localizedString("Configs"))
+            )
+        ]))
         
         var sensorsRows: [PreferencesRow] = [
             PreferencesRow(localizedString("Show unknown sensors"), component: switchView(
@@ -198,6 +209,12 @@ internal class Settings: NSStackView, Settings_v {
             Store.shared.set(key: "\(self.title)_fanValue", value: self.fanValueState.rawValue)
             self.callback()
         }
+    }
+    @objc private func openFanCurveConfig() {
+        FanCurveController.shared.openConfig()
+    }
+    @objc private func openFanSliderConfig() {
+        FanSliderController.shared.openConfig()
     }
     @objc private func handleSelection(_ sender: NSPopUpButton) {
         guard let item = sender.selectedItem, let id = item.representedObject as? String else { return }

@@ -46,6 +46,8 @@
 "Manual" = "Manual";
 "Custom" = "Custom";
 "Configs" = "Configs";
+"Fan curve" = "Fan curve";
+"Manual slider" = "Manual slider";
 "None" = "None";
 "Dots" = "Dots";
 "Arrows" = "Arrows";

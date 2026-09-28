@@ -195,6 +195,10 @@ public class CPU: Module {
     
     private func loadCallback(_ raw: CPU_Load?) {
         guard let value = raw, self.enabled else { return }
+        if self.loadReader != nil {
+            let freshness = max(5, (self.loadReader?.interval ?? 1) * 2 + 2)
+            FanCurveUsageReadings.shared.update(.cpu, fraction: value.totalUsage, freshness: freshness)
+        }
         
         self.popupView.loadCallback(value)
         self.portalView.callback(value)

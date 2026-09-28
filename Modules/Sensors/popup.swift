@@ -1073,6 +1073,22 @@ internal class FanView: NSStackView {
 
 // MARK: - Fan control view (combined)
 
+private final class ReleaseAwareSlider: NSSlider {
+    var releaseHandler: ((NSSlider) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        // NSSlider tracks the entire drag inside super.mouseDown; returning from
+        // it is the reliable indication that the pointer has been released.
+        super.mouseDown(with: event)
+        self.releaseHandler?(self)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        super.keyUp(with: event)
+        self.releaseHandler?(self)
+    }
+}
+
 /// Combined fan control: read-only rows for every fan plus a single shared
 /// control block (Automatic | Custom | Manual, one slider, profile picker).
 internal class FanControlView: NSStackView {
@@ -1371,13 +1387,17 @@ internal class FanControlView: NSStackView {
         view.distribution = .fill
         view.edgeInsets = NSEdgeInsets(top: 0, left: Constants.Popup.margins/2, bottom: Constants.Popup.margins/2, right: Constants.Popup.margins/2)
 
-        let slider: NSSlider = NSSlider()
+        let slider = ReleaseAwareSlider()
         slider.minValue = self.minSpeed
         slider.maxValue = self.maxSpeed
         slider.doubleValue = Double(self.storedSpeed ?? Int(self.fans.first?.value ?? 0))
         slider.isContinuous = true
         slider.action = #selector(self.sliderCallback)
         slider.target = self
+        slider.releaseHandler = { [weak self, weak slider] _ in
+            guard let self, let slider else { return }
+            self.snapSlider(slider)
+        }
 
         let levels: NSStackView = NSStackView()
         levels.heightAnchor.constraint(equalToConstant: 16).isActive = true
@@ -1543,7 +1563,11 @@ internal class FanControlView: NSStackView {
         let generation = self.modeGeneration
         let task = DispatchWorkItem { [weak self] in
             guard let self, self.mode == .forced, self.modeGeneration == generation else { return }
-            FanController.shared.setFanSpeeds(Dictionary(uniqueKeysWithValues: self.fans.map { ($0.id, value) })) { [weak self] success in
+            let targets = Dictionary(uniqueKeysWithValues: self.fans.map { fan in
+                let target = min(Int(fan.maxSpeed), max(Int(fan.minSpeed), value))
+                return (fan.id, target)
+            })
+            FanController.shared.setFanSpeeds(targets) { [weak self] success in
                 guard let self, success, self.mode == .forced, self.modeGeneration == generation else { return }
                 then()
             }
@@ -1568,6 +1592,18 @@ internal class FanControlView: NSStackView {
             self?.slider?.intValue = Int32(value)
             self?.sliderValueField?.textColor = .systemBlue
         })
+    }
+
+    private func snapSlider(_ sender: NSSlider) {
+        let speed = FanSliderController.shared.snappedSpeed(
+            Int(sender.doubleValue.rounded()),
+            minimum: Int(self.minSpeed),
+            maximum: Int(self.maxSpeed)
+        )
+        sender.integerValue = speed
+        self.setSpeed(value: speed) { [weak self] in
+            self?.sliderValueField?.textColor = .systemBlue
+        }
     }
 
     @objc func setMin(_ sender: NSButton) {
