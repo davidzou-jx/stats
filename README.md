@@ -107,6 +107,8 @@ Stats tries to be efficient as it's possible. But reading some data periodically
 ### Fan control
 This fork delegates all fan writes to the standalone FanController service over its authenticated Unix socket. Stats does not contain, install, or sign a privileged fan helper. Local FanController builds use an ad-hoc signature and do not require a paid Apple Developer account; macOS still requires administrator authorization once to install its root-owned launch daemon. Open **Stats Settings → FanController → Open setup guide** for installation and switch-over instructions.
 
+To configure manual speed notches, open **Stats Settings → Sensors → FanController → Manual slider → Configs**. In `fan-slider.json`, set `enabled` to `true` and list RPM values in `notches` (for example, `[2500, 3500, 4500, 5500]`). The slider shows the in-range notches at their RPM positions and sticks to the closest one while dragging; arrow keys move between notches. Min and Max buttons still select the hardware limits. Duplicate and out-of-range notches are ignored. With snapping disabled or no usable notches, the slider moves continuously. Edits are picked up when Stats becomes active or the slider is next drawn or used.
+
 ### Sensors show incorrect CPU/GPU core count
 CPU/GPU sensors are simply thermal zones (sensors) on the CPU/GPU. They have no relation to the number of cores or specific cores.
 For example, a CPU is typically divided into two clusters: efficiency and performance. Each cluster contains multiple temperature sensors, and Stats simply displays these sensors. However, "CPU Efficient Core 1" does not represent the temperature of a single efficient core—it only indicates one of the temperature sensors within the efficiency core cluster.

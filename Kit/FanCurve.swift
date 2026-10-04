@@ -271,15 +271,20 @@ public struct FanSliderConfig: Codable, Equatable {
         return try? encoder.encode(self)
     }
 
+    /// The same ordered, unique notches are used for drawing and snapping.
+    public func activeNotches(minimum: Int, maximum: Int) -> [Int] {
+        guard self.enabled else { return [] }
+        let range = min(minimum, maximum)...max(minimum, maximum)
+        return Set(self.notches).filter({ range.contains($0) }).sorted()
+    }
+
     /// Returns the nearest in-range notch, preferring the higher RPM on a tie.
     /// A disabled config or one without an in-range notch preserves the value.
     public func snappedSpeed(_ speed: Int, minimum: Int, maximum: Int) -> Int {
         let lower = min(minimum, maximum)
         let upper = max(minimum, maximum)
         let value = min(upper, max(lower, speed))
-        guard self.enabled else { return value }
-
-        let candidates = Set(self.notches).filter({ (lower...upper).contains($0) }).sorted()
+        let candidates = self.activeNotches(minimum: lower, maximum: upper)
         return candidates.min(by: { lhs, rhs in
             let leftDistance = abs(lhs - value)
             let rightDistance = abs(rhs - value)

@@ -352,7 +352,7 @@ public final class FanSliderController {
         NSWorkspace.shared.open(self.configURL)
     }
 
-    private func currentConfig() -> FanSliderConfig? {
+    internal func currentConfig() -> FanSliderConfig? {
         let fm = FileManager.default
         let directory = self.configURL.deletingLastPathComponent()
         if !fm.fileExists(atPath: directory.path) {

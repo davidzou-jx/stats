@@ -96,6 +96,7 @@
 		5E0C63702FBE4A0000D9BA3E /* popup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0C636F2FBE4A0000D9BA3E /* popup.swift */; };
 		5E0C63A42FBE5F0100D9BA42 /* FanCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0C63A12FBE5F0100D9BA3F /* FanCurve.swift */; };
 		5E0C63A52FBE5F0100D9BA43 /* FanCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0C63A22FBE5F0100D9BA40 /* FanCurve.swift */; };
+		5E0C63A82FBE5F0100D9BA46 /* FanSpeedSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0C63A72FBE5F0100D9BA45 /* FanSpeedSlider.swift */; };
 		5E0C63A62FBE5F0100D9BA44 /* FanCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0C63A32FBE5F0100D9BA41 /* FanCurve.swift */; };
 		5E6DF2573007B23A00D696BD /* uninstall.sh in Copy Files */ = {isa = PBXBuildFile; fileRef = 5CFE494129265418000F2856 /* uninstall.sh */; };
 		5EC1B2E52E2FEAFB007042A6 /* UnitedWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC1B2E42E2FEAFB007042A6 /* UnitedWidget.swift */; };
@@ -586,6 +587,7 @@
 		5E0C636F2FBE4A0000D9BA3E /* popup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = popup.swift; sourceTree = "<group>"; };
 		5E0C63A12FBE5F0100D9BA3F /* FanCurve.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanCurve.swift; sourceTree = "<group>"; };
 		5E0C63A22FBE5F0100D9BA40 /* FanCurve.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanCurve.swift; sourceTree = "<group>"; };
+		5E0C63A72FBE5F0100D9BA45 /* FanSpeedSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanSpeedSlider.swift; sourceTree = "<group>"; };
 		5E0C63A32FBE5F0100D9BA41 /* FanCurve.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanCurve.swift; sourceTree = "<group>"; };
 		5EC1B2E42E2FEAFB007042A6 /* UnitedWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitedWidget.swift; sourceTree = "<group>"; };
 		5EE5C0B83062FEA400E7DAB4 /* install.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = install.sh; sourceTree = "<group>"; };
@@ -1300,6 +1302,7 @@
 				9A58DE9F24B363F300716A9F /* settings.swift */,
 				9AE29AF7249A53420071B02D /* values.swift */,
 				5E0C63A22FBE5F0100D9BA40 /* FanCurve.swift */,
+				5E0C63A72FBE5F0100D9BA45 /* FanSpeedSlider.swift */,
 				5CF2211A2B1F8CEF006C583F /* notifications.swift */,
 				9AE29AEC249A50960071B02D /* Info.plist */,
 				9AE29AF4249A52870071B02D /* config.plist */,
@@ -2286,6 +2289,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5E0C63A52FBE5F0100D9BA43 /* FanCurve.swift in Sources */,
+				5E0C63A82FBE5F0100D9BA46 /* FanSpeedSlider.swift in Sources */,
 				5CA518382B543FE600EBCCC4 /* portal.swift in Sources */,
 				5CF2211B2B1F8CEF006C583F /* notifications.swift in Sources */,
 				9A46C05F266D85F8001A1117 /* smc.swift in Sources */,

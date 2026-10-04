@@ -1073,22 +1073,6 @@ internal class FanView: NSStackView {
 
 // MARK: - Fan control view (combined)
 
-private final class ReleaseAwareSlider: NSSlider {
-    var releaseHandler: ((NSSlider) -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        // NSSlider tracks the entire drag inside super.mouseDown; returning from
-        // it is the reliable indication that the pointer has been released.
-        super.mouseDown(with: event)
-        self.releaseHandler?(self)
-    }
-
-    override func keyUp(with event: NSEvent) {
-        super.keyUp(with: event)
-        self.releaseHandler?(self)
-    }
-}
-
 /// Combined fan control: read-only rows for every fan plus a single shared
 /// control block (Automatic | Custom | Manual, one slider, profile picker).
 internal class FanControlView: NSStackView {
@@ -1162,7 +1146,7 @@ internal class FanControlView: NSStackView {
     private var willSleepMode: FanMode? = nil
     private var willSleepSpeed: Int? = nil
 
-    public init(fans: [Fan], width: CGFloat, callback: @escaping (() -> Void)) {
+    public init(fans: [Fan], width: CGFloat, controllerAvailable: Bool? = nil, callback: @escaping (() -> Void)) {
         self.fans = fans
         self.sizeCallback = callback
         self.controlState = Store.shared.bool(key: "Sensors_fanControl", defaultValue: true)
@@ -1185,7 +1169,7 @@ internal class FanControlView: NSStackView {
         self.layer?.cornerRadius = Constants.Popup.radius
 
         self.nameAndSpeed()
-        self.setupControls()
+        self.setupControls(controllerAvailable)
 
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(self.wakeListener), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(self.sleepListener), name: NSWorkspace.willSleepNotification, object: nil)
@@ -1378,26 +1362,24 @@ internal class FanControlView: NSStackView {
     }
 
     private func control() -> NSView {
-        let view: NSStackView = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 40))
+        let view: NSStackView = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: FanSpeedSlider.controlHeight + 24))
         view.heightAnchor.constraint(equalToConstant: view.bounds.height).isActive = true
         view.widthAnchor.constraint(equalToConstant: self.frame.width).isActive = true
         view.identifier = NSUserInterfaceItemIdentifier(rawValue: "control")
 
         view.orientation = .vertical
         view.distribution = .fill
+        view.spacing = 4
         view.edgeInsets = NSEdgeInsets(top: 0, left: Constants.Popup.margins/2, bottom: Constants.Popup.margins/2, right: Constants.Popup.margins/2)
 
-        let slider = ReleaseAwareSlider()
+        let slider = FanSpeedSlider()
         slider.minValue = self.minSpeed
         slider.maxValue = self.maxSpeed
         slider.doubleValue = Double(self.storedSpeed ?? Int(self.fans.first?.value ?? 0))
         slider.isContinuous = true
         slider.action = #selector(self.sliderCallback)
         slider.target = self
-        slider.releaseHandler = { [weak self, weak slider] _ in
-            guard let self, let slider else { return }
-            self.snapSlider(slider)
-        }
+        slider.heightAnchor.constraint(equalToConstant: FanSpeedSlider.controlHeight).isActive = true
 
         let levels: NSStackView = NSStackView()
         levels.heightAnchor.constraint(equalToConstant: 16).isActive = true
@@ -1420,13 +1402,13 @@ internal class FanControlView: NSStackView {
         minBtn.layer?.borderColor = NSColor.lightGray.cgColor
 
         let valueField: NSTextField = TextView()
-        valueField.font = NSFont.systemFont(ofSize: 11, weight: .light)
+        valueField.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         valueField.textColor = .secondaryLabelColor
         valueField.alignment = .center
         valueField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         valueField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         if let speed = self.storedSpeed {
-            valueField.stringValue = "\(Int(speed))"
+            valueField.stringValue = "\(speed) RPM"
         }
 
         let maxBtn: NSButtonWithPadding = NSButtonWithPadding()
@@ -1451,6 +1433,7 @@ internal class FanControlView: NSStackView {
         view.addArrangedSubview(slider)
         view.addArrangedSubview(levels)
 
+        slider.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -Constants.Popup.margins).isActive = true
         levels.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -Constants.Popup.margins).isActive = true
 
         self.slider = slider
@@ -1589,21 +1572,8 @@ internal class FanControlView: NSStackView {
         self.maxBtn?.state = .off
 
         self.setSpeed(value: Int(value), then: { [weak self] in
-            self?.slider?.intValue = Int32(value)
             self?.sliderValueField?.textColor = .systemBlue
         })
-    }
-
-    private func snapSlider(_ sender: NSSlider) {
-        let speed = FanSliderController.shared.snappedSpeed(
-            Int(sender.doubleValue.rounded()),
-            minimum: Int(self.minSpeed),
-            maximum: Int(self.maxSpeed)
-        )
-        sender.integerValue = speed
-        self.setSpeed(value: speed) { [weak self] in
-            self?.sliderValueField?.textColor = .systemBlue
-        }
     }
 
     @objc func setMin(_ sender: NSButton) {
