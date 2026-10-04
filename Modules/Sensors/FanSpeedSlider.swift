@@ -237,7 +237,8 @@ private final class FanSpeedSliderCell: NSSliderCell {
             // A lighter blue distinguishes passed ticks from the blue track
             // without changing their size, shape, or position.
             let markColor = passed ? color.blended(withFraction: 0.55, of: .white) ?? color : color
-            markColor.setFill()
+            // Use consistent tick opacity while retaining AppKit's disabled tint.
+            (self.isEnabled ? markColor.withAlphaComponent(0.35) : markColor).setFill()
             let tick = NSRect(x: self.position(for: Double(value), in: track) - 1, y: track.midY - 4, width: 2, height: 8)
             NSBezierPath(roundedRect: tick, xRadius: 1, yRadius: 1).fill()
         }
