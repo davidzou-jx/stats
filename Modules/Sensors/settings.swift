@@ -16,6 +16,7 @@ internal class Settings: NSStackView, Settings_v {
     private var updateIntervalValue: Int = 3
     private var hidState: Bool
     private var fanSpeedState: Bool = false
+    private var fanSliderFromZero: Bool = false
     private var fansSyncState: Bool = false
     private var unknownSensorsState: Bool = false
     private var fanValueState: FanValue = .percentage
@@ -43,6 +44,7 @@ internal class Settings: NSStackView, Settings_v {
         self.updateIntervalValue = Store.shared.int(key: "\(self.title)_updateInterval", defaultValue: self.updateIntervalValue)
         self.hidState = Store.shared.bool(key: "\(self.title)_hid", defaultValue: self.hidState)
         self.fanSpeedState = Store.shared.bool(key: "\(self.title)_speed", defaultValue: self.fanSpeedState)
+        self.fanSliderFromZero = Store.shared.bool(key: FanSpeedSlider.zeroBasedRangeKey, defaultValue: false)
         self.fansSyncState = Store.shared.bool(key: "\(self.title)_fansSync", defaultValue: self.fansSyncState)
         self.unknownSensorsState = Store.shared.bool(key: "\(self.title)_unknown", defaultValue: self.unknownSensorsState)
         self.fanValueState = FanValue(rawValue: Store.shared.string(key: "\(self.title)_fanValue", defaultValue: self.fanValueState.rawValue)) ?? .percentage
@@ -80,6 +82,10 @@ internal class Settings: NSStackView, Settings_v {
             PreferencesRow(
                 localizedString("Manual slider"),
                 component: buttonView(#selector(self.openFanSliderConfig), text: localizedString("Configs"))
+            ),
+            PreferencesRow(
+                localizedString("Start manual slider at 0 RPM"),
+                component: switchView(action: #selector(self.toggleFanSliderRange), state: self.fanSliderFromZero)
             )
         ]))
         
@@ -188,6 +194,11 @@ internal class Settings: NSStackView, Settings_v {
         self.fanSpeedState = controlState(sender)
         Store.shared.set(key: "\(self.title)_speed", value: self.fanSpeedState)
         self.callback()
+    }
+    @objc private func toggleFanSliderRange(_ sender: NSControl) {
+        self.fanSliderFromZero = controlState(sender)
+        Store.shared.set(key: FanSpeedSlider.zeroBasedRangeKey, value: self.fanSliderFromZero)
+        NotificationCenter.default.post(name: FanSpeedSlider.rangeChangedNotification, object: nil)
     }
     @objc private func toggleHID(_ sender: NSControl) {
         self.hidState = controlState(sender)

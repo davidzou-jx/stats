@@ -27,15 +27,16 @@ struct FanSliderTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let configURL = directory.appendingPathComponent("fan-slider.json")
         let controller = FanSliderController(configURL: configURL)
+        var startsAtZero = false
         var config = FanSliderConfig(enabled: true, notches: [6000, 3000, 3500, 5000, 5000, 8000, 1000])
         try config.encoded()!.write(to: configURL)
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 100),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         let slider = FanSpeedSlider(frame: NSRect(x: 20, y: 30, width: 320, height: FanSpeedSlider.controlHeight),
-                                    configProvider: { controller.currentConfig() })
-        slider.minValue = 2500
-        slider.maxValue = 7500
+                                    configProvider: { controller.currentConfig() },
+                                    zeroBasedRangeProvider: { startsAtZero })
+        slider.configureRange(minimum: 2500, maximum: 7500)
         slider.doubleValue = 3000
         let target = SliderTarget()
         slider.target = target
@@ -145,8 +146,73 @@ struct FanSliderTests {
         slider.reloadConfiguration()
         precondition(slider.notches.isEmpty, "an invalid config must safely restore the native slider")
 
+        // Changing the displayed scale must not change or command the speed.
+        config = FanSliderConfig(enabled: true, notches: [0, 1000, 3000, 5000, 8000])
+        try config.encoded()!.write(to: configURL)
+        slider.doubleValue = 4321
+        target.values.removeAll()
+        let originalFrame = slider.frame
+        startsAtZero = true
+        NotificationCenter.default.post(name: FanSpeedSlider.rangeChangedNotification, object: nil)
+        precondition(slider.minValue == 0 && slider.maxValue == 7500 && slider.doubleValue == 4321)
+        precondition(slider.notches == [2500, 3000, 5000], "zero-based sliders must add the hardware minimum and ignore lower RPM notches")
+        precondition(target.values.isEmpty && slider.frame == originalFrame, "a range setting change must preserve speed and control geometry")
+        precondition((slider.accessibilityMinValue() as? NSNumber)?.doubleValue == 2500,
+                     "accessibility must report the selectable minimum, not the display scale's zero")
+        slider.doubleValue = 0
+        precondition(slider.doubleValue == 2500, "restored or programmatic speeds below minimum must be clamped")
+        _ = self.snapshot(slider)
+        precondition(abs(cell.knobRect(flipped: slider.isFlipped).midX - slider.cursorTravelRect.minX
+                         - slider.cursorTravelRect.width / 3) < 0.01,
+                     "the minimum notch must be positioned on the 0-to-max scale")
+        target.values.removeAll()
+        drag(from: 0, through: [2900, 4000, 1000], to: -1000)
+        precondition(target.values == [3000, 5000, 2500] && slider.doubleValue == 2500)
+        key(123)
+        precondition(slider.doubleValue == 2500)
+        key(124)
+        precondition(slider.doubleValue == 3000)
+        key(115)
+        precondition(slider.doubleValue == 2500)
+        precondition(slider.accessibilityPerformDecrement() && slider.doubleValue == 2500)
+        precondition(slider.accessibilityPerformIncrement() && slider.doubleValue == 3000)
+        config.notches = [2500, 2500, 3000]
+        try config.encoded()!.write(to: configURL)
+        slider.reloadConfiguration()
+        precondition(slider.notches == [2500, 3000], "the mandatory minimum must not duplicate a configured notch")
+
+        // The automatic floor stays usable without magnetic configuration.
+        for fallback in [FanSliderConfig(enabled: false, notches: [4000]),
+                         FanSliderConfig(enabled: true, notches: []),
+                         FanSliderConfig(enabled: true, notches: [1000, 8000])] {
+            try fallback.encoded()!.write(to: configURL)
+            slider.reloadConfiguration()
+            precondition(slider.notches == [2500])
+            target.values.removeAll()
+            drag(from: 0, through: [4500, 1000], to: 4200)
+            precondition(abs(slider.doubleValue - 4200) < 0.01 && target.values.allSatisfy { $0 >= 2500 },
+                         "a mandatory minimum marker must allow continuous dragging above the floor")
+            drag(from: 0, through: [], to: -1000)
+            key(123)
+            _ = slider.accessibilityPerformDecrement()
+            precondition(slider.doubleValue == 2500, "mouse, keyboard and accessibility must not cross the hardware floor")
+            // Native cell changes are clamped before the callback can command a fan.
+            cell.doubleValue = 0
+            _ = slider.sendAction(slider.action, to: slider.target)
+            precondition(slider.doubleValue == 2500 && target.values.last == 2500)
+        }
+        try Data("{broken".utf8).write(to: configURL)
+        slider.reloadConfiguration()
+        precondition(slider.notches == [2500], "invalid configuration must retain the automatic minimum notch")
+        slider.doubleValue = 4321
+        startsAtZero = false
+        target.values.removeAll()
+        NotificationCenter.default.post(name: FanSpeedSlider.rangeChangedNotification, object: nil)
+        precondition(slider.minValue == 2500 && slider.maxValue == 7500 && slider.doubleValue == 4321)
+        precondition(slider.notches.isEmpty && target.values.isEmpty && slider.frame == originalFrame)
+
         if CommandLine.arguments.count > 1 { try self.renderPreviews(at: CommandLine.arguments[1]) }
-        print("Fan-slider UI regressions passed (native appearance/tinting, layout, magnetic dragging, keyboard/accessibility, Min/Max and config refresh/fallback).")
+        print("Fan-slider UI regressions passed (native appearance/tinting, layout, magnetic dragging, keyboard/accessibility, Min/Max, zero-based range/floor and config refresh/fallback).")
     }
 
     private static func snapshot(_ view: NSView) -> NSBitmapImageRep {
@@ -182,25 +248,26 @@ struct FanSliderTests {
         let directory = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-            let view = PreviewBackground(frame: NSRect(x: 0, y: 0, width: 380, height: 420))
+            let view = PreviewBackground(frame: NSRect(x: 0, y: 0, width: 380, height: 580))
             view.appearance = NSAppearance(named: appearance)
-            let examples: [(String, FanSliderConfig, Double)] = [
-                ("Configured notches", FanSliderConfig(enabled: true, notches: [2500, 3500, 4500, 5500, 6500, 7500]), 4500),
-                ("Uneven notch spacing", FanSliderConfig(enabled: true, notches: [3000, 3500, 5000, 6000]), 3500),
-                ("Dense labels", FanSliderConfig(enabled: true, notches: [3000, 3050, 3100, 3150, 3200, 4500, 6500]), 3100),
-                ("Single notch", FanSliderConfig(enabled: true, notches: [6000]), 6000),
-                ("Snapping disabled", FanSliderConfig(enabled: false, notches: [3000, 5000]), 4200),
+            let examples: [(String, FanSliderConfig, Double, Bool)] = [
+                ("Configured notches", FanSliderConfig(enabled: true, notches: [2500, 3500, 4500, 5500, 6500, 7500]), 4500, false),
+                ("Uneven notch spacing", FanSliderConfig(enabled: true, notches: [3000, 3500, 5000, 6000]), 3500, false),
+                ("Dense labels", FanSliderConfig(enabled: true, notches: [3000, 3050, 3100, 3150, 3200, 4500, 6500]), 3100, false),
+                ("Single notch", FanSliderConfig(enabled: true, notches: [6000]), 6000, false),
+                ("Snapping disabled", FanSliderConfig(enabled: false, notches: [3000, 5000]), 4200, false),
+                ("0-to-max scale with automatic minimum", FanSliderConfig(enabled: true, notches: [3500, 4500, 5500, 6500, 7500]), 4500, true),
+                ("0-to-max scale with snapping disabled", FanSliderConfig(enabled: false, notches: []), 4200, true)
             ]
             for (index, example) in examples.enumerated() {
-                let y = 420 - CGFloat(index + 1) * 80
+                let y = 580 - CGFloat(index + 1) * 80
                 let title = NSTextField(labelWithString: example.0)
                 title.frame = NSRect(x: 20, y: y + 48, width: 340, height: 20)
                 title.font = NSFont.systemFont(ofSize: 12, weight: .medium)
                 view.addSubview(title)
                 let slider = FanSpeedSlider(frame: NSRect(x: 20, y: y, width: 340, height: FanSpeedSlider.controlHeight),
-                                            configProvider: { example.1 })
-                slider.minValue = 2500
-                slider.maxValue = 7500
+                                            configProvider: { example.1 }, zeroBasedRangeProvider: { example.3 })
+                slider.configureRange(minimum: 2500, maximum: 7500)
                 slider.doubleValue = example.2
                 slider.reloadConfiguration()
                 view.addSubview(slider)

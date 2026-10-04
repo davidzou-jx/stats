@@ -109,6 +109,8 @@ This fork delegates all fan writes to the standalone FanController service over 
 
 To configure manual speed notches, open **Stats Settings → Sensors → FanController → Manual slider → Configs**. In `fan-slider.json`, set `enabled` to `true` and list RPM values in `notches` (for example, `[2500, 3500, 4500, 5500]`). The slider shows the in-range notches at their RPM positions and sticks to the closest one while dragging; arrow keys move between notches. Min and Max buttons still select the hardware limits. Duplicate and out-of-range notches are ignored. With snapping disabled or no usable notches, the slider moves continuously. Edits are picked up when Stats becomes active or the slider is next drawn or used.
 
+Enable **Start manual slider at 0 RPM** in the same settings section to display a 0-to-max scale. A notch is automatically added at the fan's minimum RPM, which remains the lowest selectable speed even when custom snapping is disabled.
+
 ### Sensors show incorrect CPU/GPU core count
 CPU/GPU sensors are simply thermal zones (sensors) on the CPU/GPU. They have no relation to the number of cores or specific cores.
 For example, a CPU is typically divided into two clusters: efficiency and performance. Each cluster contains multiple temperature sensors, and Stats simply displays these sensors. However, "CPU Efficient Core 1" does not represent the temperature of a single efficient core—it only indicates one of the temperature sensors within the efficiency core cluster.

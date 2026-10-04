@@ -1373,8 +1373,7 @@ internal class FanControlView: NSStackView {
         view.edgeInsets = NSEdgeInsets(top: 0, left: Constants.Popup.margins/2, bottom: Constants.Popup.margins/2, right: Constants.Popup.margins/2)
 
         let slider = FanSpeedSlider()
-        slider.minValue = self.minSpeed
-        slider.maxValue = self.maxSpeed
+        slider.configureRange(minimum: self.minSpeed, maximum: self.maxSpeed)
         slider.doubleValue = Double(self.storedSpeed ?? Int(self.fans.first?.value ?? 0))
         slider.isContinuous = true
         slider.action = #selector(self.sliderCallback)

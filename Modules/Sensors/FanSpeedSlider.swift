@@ -7,10 +7,16 @@ import Cocoa
 import Kit
 
 /// A continuous native slider without notches, or a magnetic RPM selector with
-/// configured notches. Programmatic values (including Min/Max) remain exact.
+/// configured notches. Programmatic values (including Min/Max) remain exact
+/// within the hardware limits, even when the displayed scale starts at zero.
 internal final class FanSpeedSlider: NSSlider {
     internal static let controlHeight: CGFloat = 44
+    internal static let zeroBasedRangeKey = "Sensors_fanSliderFromZero"
+    internal static let rangeChangedNotification = Notification.Name("Sensors.fanSliderRangeChanged")
     private let configProvider: () -> FanSliderConfig?
+    private let zeroBasedRangeProvider: () -> Bool
+    private var minimumRPM: Double?
+    private var snappingNotches: [Int] = []
     private var isDragging = false
 
     internal var notches: [Int] { (self.cell as? FanSpeedSliderCell)?.notches ?? [] }
@@ -20,8 +26,11 @@ internal final class FanSpeedSlider: NSSlider {
 
     internal init(frame: NSRect = .zero, configProvider: @escaping () -> FanSliderConfig? = {
         FanSliderController.shared.currentConfig()
+    }, zeroBasedRangeProvider: @escaping () -> Bool = {
+        Store.shared.bool(key: FanSpeedSlider.zeroBasedRangeKey, defaultValue: false)
     }) {
         self.configProvider = configProvider
+        self.zeroBasedRangeProvider = zeroBasedRangeProvider
         super.init(frame: frame)
         self.cell = FanSpeedSliderCell()
         self.cell?.controlView = self
@@ -30,6 +39,8 @@ internal final class FanSpeedSlider: NSSlider {
         self.setAccessibilityLabel(localizedString("Manual slider"))
         NotificationCenter.default.addObserver(self, selector: #selector(self.reloadConfiguration),
                                                name: NSApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.reloadConfiguration),
+                                               name: Self.rangeChangedNotification, object: nil)
     }
 
     required init?(coder: NSCoder) {
@@ -42,6 +53,26 @@ internal final class FanSpeedSlider: NSSlider {
         NSSize(width: super.intrinsicContentSize.width, height: Self.controlHeight)
     }
 
+    internal func configureRange(minimum: Double, maximum: Double) {
+        self.maxValue = maximum
+        self.minimumRPM = minimum
+        self.reloadConfiguration()
+    }
+
+    private var minimumSelectableValue: Double {
+        max(self.minValue, self.minimumRPM ?? self.minValue)
+    }
+
+    private func clampedSpeed(_ value: Double) -> Double {
+        guard value.isFinite else { return self.minimumSelectableValue }
+        return max(self.minimumSelectableValue, min(self.maxValue, value))
+    }
+
+    override var doubleValue: Double {
+        get { super.doubleValue }
+        set { super.doubleValue = self.clampedSpeed(newValue) }
+    }
+
     override func viewWillDraw() {
         if !self.isDragging { self.reloadConfiguration() }
         super.viewWillDraw()
@@ -49,24 +80,47 @@ internal final class FanSpeedSlider: NSSlider {
 
     @objc internal func reloadConfiguration() {
         guard !self.isDragging, let cell = self.cell as? FanSpeedSliderCell else { return }
-        let notches = self.configProvider()?.activeNotches(minimum: Int(self.minValue), maximum: Int(self.maxValue)) ?? []
-        guard cell.notches != notches else { return }
-        cell.notches = notches
-        let description = notches.isEmpty ? nil : notches.map(String.init).joined(separator: ", ") + " RPM"
-        self.toolTip = description
-        self.setAccessibilityHelp(description)
-        self.needsDisplay = true
+        let startsAtZero = self.minimumRPM != nil && self.zeroBasedRangeProvider()
+        if let minimumRPM {
+            let minimum = startsAtZero ? 0 : minimumRPM
+            if self.minValue != minimum {
+                self.minValue = minimum
+                self.needsDisplay = true
+            }
+        }
+        self.doubleValue = self.clampedSpeed(self.doubleValue)
+        self.setAccessibilityMinValue(self.minimumSelectableValue)
+
+        let configured = self.configProvider()?.activeNotches(minimum: Int(self.minimumSelectableValue),
+                                                              maximum: Int(self.maxValue)) ?? []
+        var notches = configured
+        if startsAtZero {
+            notches = Array(Set(notches + [Int(self.minimumSelectableValue)])).sorted()
+        }
+        // A mandatory minimum marker alone must not turn continuous control
+        // into a slider that can only select the minimum.
+        self.snappingNotches = configured.isEmpty ? [] : notches
+        if cell.notches != notches {
+            cell.notches = notches
+            let description = notches.isEmpty ? nil : notches.map(String.init).joined(separator: ", ") + " RPM"
+            self.toolTip = description
+            self.setAccessibilityHelp(description)
+            self.needsDisplay = true
+        }
     }
 
     private func nearestNotch(to value: Double) -> Double {
-        Double(self.notches.min(by: { lhs, rhs in
+        let value = self.clampedSpeed(value)
+        guard let notch = self.snappingNotches.min(by: { lhs, rhs in
             let left = abs(Double(lhs) - value)
             let right = abs(Double(rhs) - value)
             return left == right ? lhs > rhs : left < right
-        }) ?? Int(value.rounded()))
+        }) else { return value }
+        return Double(notch)
     }
 
     private func selectSpeed(_ value: Double) {
+        let value = self.clampedSpeed(value)
         guard self.doubleValue != value else { return }
         self.doubleValue = value
         self.needsDisplay = true
@@ -109,19 +163,19 @@ internal final class FanSpeedSlider: NSSlider {
 
     private func stepNotch(forward: Bool) {
         let next = forward
-            ? self.notches.first(where: { Double($0) > self.doubleValue }) ?? self.notches.last!
-            : self.notches.last(where: { Double($0) < self.doubleValue }) ?? self.notches.first!
+            ? self.snappingNotches.first(where: { Double($0) > self.doubleValue }) ?? self.snappingNotches.last!
+            : self.snappingNotches.last(where: { Double($0) < self.doubleValue }) ?? self.snappingNotches.first!
         self.selectSpeed(Double(next))
     }
 
     override func keyDown(with event: NSEvent) {
         self.reloadConfiguration()
-        guard self.isEnabled, !self.notches.isEmpty else { super.keyDown(with: event); return }
+        guard self.isEnabled, !self.snappingNotches.isEmpty else { super.keyDown(with: event); return }
         switch event.keyCode {
         case 123, 125: self.stepNotch(forward: false)
         case 124, 126: self.stepNotch(forward: true)
-        case 115: self.selectSpeed(Double(self.notches.first!))
-        case 119: self.selectSpeed(Double(self.notches.last!))
+        case 115: self.selectSpeed(Double(self.snappingNotches.first!))
+        case 119: self.selectSpeed(Double(self.snappingNotches.last!))
         default: super.keyDown(with: event)
         }
     }
@@ -129,14 +183,14 @@ internal final class FanSpeedSlider: NSSlider {
     override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
         // Native accessibility value changes must use the same notch selection.
         if !self.isDragging { self.reloadConfiguration() }
-        if !self.notches.isEmpty { self.doubleValue = self.nearestNotch(to: self.doubleValue) }
+        self.doubleValue = self.nearestNotch(to: self.doubleValue)
         return super.sendAction(action, to: target)
     }
 
     override func accessibilityPerformIncrement() -> Bool {
         self.reloadConfiguration()
         guard self.isEnabled else { return false }
-        guard !self.notches.isEmpty else { return super.accessibilityPerformIncrement() }
+        guard !self.snappingNotches.isEmpty else { return super.accessibilityPerformIncrement() }
         self.stepNotch(forward: true)
         return true
     }
@@ -144,7 +198,7 @@ internal final class FanSpeedSlider: NSSlider {
     override func accessibilityPerformDecrement() -> Bool {
         self.reloadConfiguration()
         guard self.isEnabled else { return false }
-        guard !self.notches.isEmpty else { return super.accessibilityPerformDecrement() }
+        guard !self.snappingNotches.isEmpty else { return super.accessibilityPerformDecrement() }
         self.stepNotch(forward: false)
         return true
     }
